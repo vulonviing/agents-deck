@@ -1,0 +1,141 @@
+name: CI and Release
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+
+concurrency:
+  group: agents-deck-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Build and audit
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          persist-credentials: false
+
+      - name: Verify public source boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          forbidden_tracked_files='(^|/)(AGENTS\.md|CLAUDE\.md)$|(^|/)(AgentsDeckTests|docs|graphify-out|\.codex|\.claude)(/|$)'
+          if git ls-files | grep -E -n "$forbidden_tracked_files"; then
+            echo "Internal development material is tracked" >&2
+            exit 1
+          fi
+
+          forbidden_content='/Users/[^/[:space:]]+|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|gh[opsu]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|sk-(proj-)?[A-Za-z0-9_-]{20,}|sk-ant-[A-Za-z0-9_-]{20,}'
+          if git grep -n -I -E "$forbidden_content" -- ':!scripts/package_dmg.sh' ':!.github/workflows/ci-release.yml'; then
+            echo "Private local path or credential marker found" >&2
+            exit 1
+          fi
+
+          identifiers="$(grep -E -o 'PRODUCT_BUNDLE_IDENTIFIER = [^;]+' AgentsDeck.xcodeproj/project.pbxproj | awk '{print $3}' | sort -u)"
+          if [[ "$identifiers" != "com.vulonviing.agentsdeck" ]]; then
+            echo "Unexpected bundle identifier found: $identifiers" >&2
+            exit 1
+          fi
+
+      - name: Build
+        run: xcodebuild -project AgentsDeck.xcodeproj -scheme AgentsDeck -destination 'platform=macOS' build
+
+      - name: Analyze
+        run: xcodebuild -project AgentsDeck.xcodeproj -scheme AgentsDeck -destination 'platform=macOS' analyze
+
+  release:
+    name: Publish DMG
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: audit
+    runs-on: macos-26
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      attestations: write
+      id-token: write
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify signed annotated release tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag_object_sha="$(git rev-parse "${GITHUB_REF_NAME}^{tag}")"
+          tag_verified="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${tag_object_sha}" --jq '.verification.verified')"
+          if [[ "$tag_verified" != "true" ]]; then
+            echo "Release tag must be an SSH-signed, GitHub-verified annotated tag" >&2
+            exit 1
+          fi
+
+      - name: Validate version and package DMG
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_version="${GITHUB_REF_NAME#v}"
+          if [[ ! "$release_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tags must use v<major.minor.patch>" >&2
+            exit 1
+          fi
+          project_version="$(xcodebuild -project AgentsDeck.xcodeproj -scheme AgentsDeck -configuration Release -showBuildSettings 2>/dev/null | awk '/ MARKETING_VERSION = / { print $3; exit }')"
+          if [[ "$project_version" != "$release_version" ]]; then
+            echo "Tag $GITHUB_REF_NAME does not match MARKETING_VERSION $project_version" >&2
+            exit 1
+          fi
+          scripts/package_dmg.sh "$release_version"
+
+      - name: Attest release assets
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373
+        with:
+          subject-path: |
+            dist/Agents-Deck-*.dmg
+            dist/Agents-Deck-*.sha256
+
+      - name: Verify attestation and publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_version="${GITHUB_REF_NAME#v}"
+          gh attestation verify "dist/Agents-Deck-${release_version}.dmg" --repo "$GITHUB_REPOSITORY"
+          gh attestation verify "dist/Agents-Deck-${release_version}.sha256" --repo "$GITHUB_REPOSITORY"
+
+          release_notes="${RUNNER_TEMP}/agents-deck-release-notes.md"
+          printf '%s\n' \
+            'Agents Deck is a local-only macOS menu bar utility for verified Claude Code and Codex usage.' \
+            '' \
+            '**Security hardening:** Version 1.0.0 was withdrawn. Version 1.0.1 removes debug entitlements and adds signed source, protected release tags, release-bundle audits, SHA-256 checksums, and GitHub artifact attestations.' \
+            '' \
+            '**Distribution notice:** This free build is ad-hoc signed and is not Apple-notarized. Verify the checksum and attestation, then follow the README Open Anyway instructions. Never disable Gatekeeper globally.' \
+            '' \
+            'Verify the DMG attestation with: `gh attestation verify Agents-Deck-1.0.1.dmg --repo vulonviing/agents-deck`' \
+            '' \
+            'Updates are manual: quit the existing app, open the new DMG, and replace Agents Deck in Applications.' \
+            > "$release_notes"
+
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/Agents-Deck-${release_version}.dmg" \
+            "dist/Agents-Deck-${release_version}.sha256" \
+            --draft \
+            --verify-tag \
+            --title "Agents Deck ${GITHUB_REF_NAME}" \
+            --notes-file "$release_notes"
+          gh release edit "$GITHUB_REF_NAME" --draft=false

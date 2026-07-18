@@ -1,0 +1,41 @@
+# Xcode
+DerivedData/
+build/
+dist/
+*.app
+*.dmg
+*.dSYM/
+*.xcarchive/
+*.xcuserstate
+xcuserdata/
+*.xccheckout
+*.xcscmblueprint
+
+# Swift Package Manager (not used by the app, ignored defensively)
+.build/
+.swiftpm/
+Package.resolved
+
+# macOS
+.DS_Store
+
+# Local application data and diagnostics
+*.store
+*.store-shm
+*.store-wal
+*.jsonl
+Agents Deck Data/
+
+# Local secrets and environment files
+.env
+.env.*
+!.env.example
+
+# Internal development material is never published
+**/AGENTS.md
+**/CLAUDE.md
+AgentsDeckTests/
+docs/
+graphify-out/
+.codex/
+.claude/
