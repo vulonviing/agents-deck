@@ -70,11 +70,28 @@ audit_application() {
   done < <(/usr/bin/otool -arch arm64 -L "$executable" | /usr/bin/awk '/^[[:space:]]+\// {print $1}')
 
   if /usr/bin/grep -R -a -E -i -l \
-    '/Users/[^/[:space:]]+|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|gh[opsu]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|sk-(proj-)?[A-Za-z0-9_-]{20,}|sk-ant-[A-Za-z0-9_-]{20,}|[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}' \
+    '/Users/[^/[:space:]]+|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|gh[opsu]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|sk-(proj-)?[A-Za-z0-9_-]{20,}|sk-ant-[A-Za-z0-9_-]{20,}' \
     "$application" >/dev/null; then
     echo "Release app contains a forbidden private identity, path, or credential marker" >&2
     exit 68
   fi
+
+  # Checked separately from the patterns above: this pattern also matches Apple's
+  # standard @1x/@2x/@3x retina asset filenames (e.g. app-icon-128@2x.png) baked
+  # into the compiled Assets.car, which are not credentials. Filter those out
+  # before treating any remaining match as a real leaked email address.
+  local email_match
+  while IFS= read -r email_match; do
+    case "$email_match" in
+      *@[1-3]x.png|*@[1-3]x.pdf|*@[1-3]x.jpg|*@[1-3]x.jpeg|*@[1-3]x.heic) ;;
+      *)
+        echo "Release app contains a forbidden email address marker: $email_match" >&2
+        exit 68
+        ;;
+    esac
+  done < <(/usr/bin/grep -R -a -E -i -o \
+    '[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}' \
+    "$application" 2>/dev/null | sort -u)
 }
 
 cleanup() {

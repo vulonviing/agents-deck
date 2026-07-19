@@ -17,11 +17,13 @@ final class AppModel {
     private(set) var menuBarProviderSelection: MenuBarProviderSelection
     private(set) var sessionHistoryRange: SessionHistoryRange
     private(set) var refreshCadence: RefreshCadence
+    private(set) var isMenuBarItemVisible: Bool
     var presentedError: String?
     var notificationsGranted = false
     var launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
     private(set) var sessionConfigurations: [SessionConfigurationPeriod] = []
     private(set) var sessionHistoryLoading = false
+    var menuBarVisibilityDidChange: (@MainActor (Bool) -> Void)?
 
     init(
         coordinator: UsageCoordinator = UsageCoordinator(),
@@ -34,6 +36,7 @@ final class AppModel {
         self.menuBarProviderSelection = profile.menuBarProviderSelection
         self.sessionHistoryRange = profile.sessionHistoryRange
         self.refreshCadence = profile.refreshCadence
+        self.isMenuBarItemVisible = profile.menuBarItemVisible
     }
 
     func start() {
@@ -71,6 +74,21 @@ final class AppModel {
         uiProfile.refreshCadence = cadence
         persistUIProfile()
         Task { await coordinator.setRefreshCadence(cadence) }
+    }
+
+    func setMenuBarItemVisible(_ visible: Bool) {
+        guard isMenuBarItemVisible != visible else { return }
+        isMenuBarItemVisible = visible
+        uiProfile.menuBarItemVisible = visible
+        persistUIProfile()
+        menuBarVisibilityDidChange?(visible)
+    }
+
+    func synchronizeMenuBarItemVisibility(_ visible: Bool) {
+        guard isMenuBarItemVisible != visible else { return }
+        isMenuBarItemVisible = visible
+        uiProfile.menuBarItemVisible = visible
+        persistUIProfile()
     }
 
     func setSessionHistoryRange(_ range: SessionHistoryRange) {

@@ -81,6 +81,7 @@ struct DeckUIProfile: Codable, Equatable {
     var menuBarProviderSelection: MenuBarProviderSelection = .both
     var sessionHistoryRange: SessionHistoryRange = .sevenDays
     var refreshCadence: RefreshCadence = .oneToThreeMinutes
+    var menuBarItemVisible = true
     var panelWidth: Double?
     var panelHeight: Double?
     var panelLayoutVersion: Int?
@@ -95,6 +96,7 @@ extension DeckUIProfile {
         case menuBarProviderSelection
         case sessionHistoryRange
         case refreshCadence
+        case menuBarItemVisible
         case panelWidth
         case panelHeight
         case panelLayoutVersion
@@ -132,6 +134,7 @@ extension DeckUIProfile {
             sessionHistoryRange = .sevenDays
         }
         refreshCadence = try values.decodeIfPresent(RefreshCadence.self, forKey: .refreshCadence) ?? .oneToThreeMinutes
+        menuBarItemVisible = try values.decodeIfPresent(Bool.self, forKey: .menuBarItemVisible) ?? true
         panelWidth = try values.decodeIfPresent(Double.self, forKey: .panelWidth)
         panelHeight = try values.decodeIfPresent(Double.self, forKey: .panelHeight)
         panelLayoutVersion = try values.decodeIfPresent(Int.self, forKey: .panelLayoutVersion)
@@ -144,6 +147,7 @@ extension DeckUIProfile {
         try values.encode(menuBarProviderSelection, forKey: .menuBarProviderSelection)
         try values.encode(sessionHistoryRange, forKey: .sessionHistoryRange)
         try values.encode(refreshCadence, forKey: .refreshCadence)
+        try values.encode(menuBarItemVisible, forKey: .menuBarItemVisible)
         try values.encodeIfPresent(panelWidth, forKey: .panelWidth)
         try values.encodeIfPresent(panelHeight, forKey: .panelHeight)
         try values.encodeIfPresent(panelLayoutVersion, forKey: .panelLayoutVersion)
