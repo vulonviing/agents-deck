@@ -8,12 +8,12 @@ It shows each provider's verified usage windows with their real durations, reset
 
 ## Download and install
 
-1. Download `Agents-Deck-1.0.1.dmg` and its `.sha256` file from the latest [GitHub Release](https://github.com/vulonviing/agents-deck/releases/latest).
+1. Download `Agents-Deck-1.1.0.dmg` and its `.sha256` file from the latest [GitHub Release](https://github.com/vulonviing/agents-deck/releases/latest).
 2. Optionally verify the download:
 
    ```sh
-   shasum -a 256 -c Agents-Deck-1.0.1.sha256
-   gh attestation verify Agents-Deck-1.0.1.dmg --repo vulonviing/agents-deck
+   shasum -a 256 -c Agents-Deck-1.1.0.sha256
+   gh attestation verify Agents-Deck-1.1.0.dmg --repo vulonviing/agents-deck
    ```
 
 3. Open the DMG and drag **Agents Deck** to **Applications**.
@@ -128,7 +128,7 @@ Application-owned data stays under:
 
 Release DMGs are built on an ephemeral GitHub-hosted macOS 26 runner using only Apple command-line tools. Each release includes a SHA-256 checksum and a GitHub artifact attestation. The workflow rejects local user paths, credential markers, internal development material, unexpected bundle contents, non-system dynamic libraries, and unexpected code-signing entitlements before publishing.
 
-Version 1.0.1 is ad-hoc signed because the project has no paid Apple Developer membership. Version 1.0.0 was withdrawn and replaced after release-build hardening. A checksum and attestation help verify the published artifact, but they are not substitutes for Developer ID signing and Apple notarization. The release page and this README intentionally disclose that limitation.
+Version 1.1.0, like every release since, is ad-hoc signed because the project has no paid Apple Developer membership. Version 1.0.0 was withdrawn and replaced by 1.0.1 after release-build hardening. A checksum and attestation help verify the published artifact, but they are not substitutes for Developer ID signing and Apple notarization. The release page and this README intentionally disclose that limitation.
 
 ## Runtime design
 

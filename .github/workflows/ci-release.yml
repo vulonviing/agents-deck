@@ -152,9 +152,11 @@ jobs:
             '' \
             '**Security hardening:** Version 1.0.0 was withdrawn. Version 1.0.1 removes debug entitlements and adds signed source, protected release tags, release-bundle audits, SHA-256 checksums, and GitHub artifact attestations.' \
             '' \
+            '**New in 1.1.0:** Fixes the menu bar icon occasionally failing to render, adds a proper app icon, and reworks Settings with a menu bar show/hide toggle.' \
+            '' \
             '**Distribution notice:** This free build is ad-hoc signed and is not Apple-notarized. Verify the checksum and attestation, then follow the README Open Anyway instructions. Never disable Gatekeeper globally.' \
             '' \
-            'Verify the DMG attestation with: `gh attestation verify Agents-Deck-1.0.1.dmg --repo vulonviing/agents-deck`' \
+            "Verify the DMG attestation with: \`gh attestation verify Agents-Deck-${release_version}.dmg --repo vulonviing/agents-deck\`" \
             '' \
             'Updates are manual: quit the existing app, open the new DMG, and replace Agents Deck in Applications.' \
             > "$release_notes"

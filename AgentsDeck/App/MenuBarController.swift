@@ -4,7 +4,8 @@ import SwiftUI
 @MainActor
 final class MenuBarController: NSObject, NSWindowDelegate {
     private let model: AppModel
-    private let statusItem: NSStatusItem
+    private let statusBar = NSStatusBar.system
+    private var statusItem: NSStatusItem?
     private let panel: DeckPanel
     private let hostingController: NSHostingController<AnyView>
     private let settingsController: SettingsWindowController
@@ -14,42 +15,85 @@ final class MenuBarController: NSObject, NSWindowDelegate {
     private var hoveredStatusProvider: ProviderID?
     private var outsideClickMonitor: Any?
     private var keyEventMonitor: Any?
+    private let onStatusItemInteraction: @MainActor () -> Void
 
-    init(model: AppModel) {
+    private static let statusItemAutosaveName = "AgentsDeck.StatusItem.v3"
+
+    init(
+        model: AppModel,
+        onStatusItemInteraction: @escaping @MainActor () -> Void = {}
+    ) {
         self.model = model
-        self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         self.settingsController = SettingsWindowController(model: model)
+        self.onStatusItemInteraction = onStatusItemInteraction
 
         let initialSize = model.resolvedPanelSize()
         self.panel = DeckPanel(
             contentRect: NSRect(origin: .zero, size: initialSize),
-            styleMask: [.borderless, .resizable, .fullSizeContentView],
+            styleMask: [.borderless, .nonactivatingPanel, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
         self.hostingController = NSHostingController(rootView: AnyView(EmptyView()))
         super.init()
 
-        configureStatusItem()
         configurePanel()
+        model.menuBarVisibilityDidChange = { [weak self] visible in
+            self?.setStatusItemVisible(visible)
+        }
         updateStatusItem(model.state)
+        if model.isMenuBarItemVisible {
+            showStatusItem()
+        }
         model.stateDidChange = { [weak self] state in
             self?.updateStatusItem(state)
         }
     }
 
-    private func configureStatusItem() {
-        guard let button = statusItem.button else { return }
+    private func createStatusItemIfNeeded() {
+        guard statusItem == nil else { return }
+        StatusItemVisibilityPersistence.clearVisibilityKeys()
+
+        let item = statusBar.statusItem(withLength: NSStatusItem.variableLength)
+        item.autosaveName = Self.statusItemAutosaveName
+        item.behavior = []
+        statusItem = item
+
+        configureStatusItemButton()
+        renderStatusButton()
+        if let button = statusItem?.button {
+            updateStatusAccessibility(on: button)
+        }
+        refreshStatusTracking()
+        StatusItemVisibilityPersistence.clearVisibilityKeys()
+    }
+
+    private func configureStatusItemButton() {
+        guard let statusItem,
+              let button = statusItem.button
+        else { return }
         button.image = nil
         button.title = ""
         button.toolTip = nil
         button.target = self
         button.action = #selector(statusItemClicked(_:))
         button.sendAction(on: [.leftMouseDown, .rightMouseDown])
-        refreshStatusTracking()
+    }
+
+    private func showStatusItem() {
+        createStatusItemIfNeeded()
+        statusItem?.isVisible = true
+        StatusItemVisibilityPersistence.clearVisibilityKeys()
+        model.synchronizeMenuBarItemVisibility(true)
+    }
+
+    private func hideStatusItem() {
+        statusItem?.isVisible = false
+        StatusItemVisibilityPersistence.clearVisibilityKeys()
     }
 
     @objc private func statusItemClicked(_ sender: Any?) {
+        onStatusItemInteraction()
         switch StatusItemActionResolver.action(for: NSApp.currentEvent?.type) {
         case .togglePanel:
             panel.isVisible ? closePanel() : openPanel()
@@ -69,6 +113,8 @@ final class MenuBarController: NSObject, NSWindowDelegate {
         panel.isOpaque = false
         panel.hasShadow = true
         panel.isFloatingPanel = true
+        panel.becomesKeyOnlyIfNeeded = true
+        panel.hidesOnDeactivate = false
         panel.level = .statusBar
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         panel.minSize = NSSize(width: DeckDesign.popoverMinimumWidth, height: DeckDesign.popoverMinimumHeight)
@@ -81,7 +127,6 @@ final class MenuBarController: NSObject, NSWindowDelegate {
                 .environment(model)
         )
         panel.setContentSize(model.resolvedPanelSize())
-        NSApp.activate(ignoringOtherApps: true)
         positionPanel()
         panel.makeKeyAndOrderFront(nil)
         model.popoverOpened()
@@ -97,7 +142,7 @@ final class MenuBarController: NSObject, NSWindowDelegate {
     }
 
     private func positionPanel() {
-        guard let button = statusItem.button,
+        guard let button = statusItem?.button,
               let window = button.window,
               let screen = window.screen ?? NSScreen.main
         else { return }
@@ -115,7 +160,9 @@ final class MenuBarController: NSObject, NSWindowDelegate {
     }
 
     private func showContextMenu() {
-        guard let button = statusItem.button else { return }
+        guard let statusItem,
+              let button = statusItem.button
+        else { return }
         let menu = NSMenu()
         let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settings.target = self
@@ -133,6 +180,11 @@ final class MenuBarController: NSObject, NSWindowDelegate {
     }
 
     @objc private func openSettings() {
+        showSettings()
+    }
+
+    func showSettings() {
+        closePanel()
         settingsController.show()
     }
 
@@ -141,7 +193,6 @@ final class MenuBarController: NSObject, NSWindowDelegate {
     }
 
     private func updateStatusItem(_ state: AppViewState) {
-        guard let button = statusItem.button else { return }
         let selectedWindows = Dictionary(uniqueKeysWithValues: ProviderID.allCases.map {
             ($0, model.selectedUsageWindow(for: $0))
         }.compactMap { provider, kind in kind.map { (provider, $0) } })
@@ -154,21 +205,35 @@ final class MenuBarController: NSObject, NSWindowDelegate {
         hoveredStatusProvider = displays.contains { $0.provider == hoveredStatusProvider }
             ? hoveredStatusProvider
             : nil
-        statusItem.length = MenuBarStatusLayout.contentWidth(segmentCount: displays.count)
+        guard let statusItem,
+              let button = statusItem.button
+        else { return }
         renderStatusButton()
         refreshStatusTracking()
-        let accessibilityParts = displays.map { display in
-            if let percent = display.percent {
-                "\(display.provider.displayName) \(percent) percent"
-            } else {
-                "\(display.provider.displayName) unavailable"
-            }
+        updateStatusAccessibility(on: button)
+    }
+
+    private func setStatusItemVisible(_ visible: Bool) {
+        if visible {
+            showStatusItem()
+        } else {
+            closePanel()
+            hideStatusItem()
+            model.synchronizeMenuBarItemVisibility(false)
         }
-        button.setAccessibilityLabel("Agents Deck, " + accessibilityParts.joined(separator: ", "))
     }
 
     private func renderStatusButton() {
-        guard let button = statusItem.button else { return }
+        guard let statusItem,
+              let button = statusItem.button
+        else { return }
+
+        statusItem.length = MenuBarStatusLayout.contentWidth(segmentCount: statusDisplays.count)
+        button.image = nil
+        renderExpandedStatusTitle(on: button)
+    }
+
+    private func renderExpandedStatusTitle(on button: NSStatusBarButton) {
         let result = NSMutableAttributedString()
         for (index, display) in statusDisplays.enumerated() {
             if index > 0 {
@@ -194,6 +259,17 @@ final class MenuBarController: NSObject, NSWindowDelegate {
         button.attributedTitle = result
     }
 
+    private func updateStatusAccessibility(on button: NSStatusBarButton) {
+        let accessibilityParts = statusDisplays.map { display in
+            if let percent = display.percent {
+                "\(display.provider.displayName) \(percent) percent"
+            } else {
+                "\(display.provider.displayName) unavailable"
+            }
+        }
+        button.setAccessibilityLabel("Agents Deck, " + accessibilityParts.joined(separator: ", "))
+    }
+
     private func statusImage(for provider: ProviderID) -> NSImage? {
         let assetName = provider == .claude ? "ClaudeProviderMark" : "CodexProviderMark"
         guard let source = NSImage(named: NSImage.Name(assetName))
@@ -213,7 +289,7 @@ final class MenuBarController: NSObject, NSWindowDelegate {
     }
 
     private func refreshStatusTracking() {
-        guard let button = statusItem.button else { return }
+        guard let button = statusItem?.button else { return }
         if let statusTrackingArea { button.removeTrackingArea(statusTrackingArea) }
         let area = NSTrackingArea(
             rect: button.bounds,
@@ -228,6 +304,18 @@ final class MenuBarController: NSObject, NSWindowDelegate {
         statusToolTipTag = button.addToolTip(button.bounds, owner: self, userData: nil)
     }
 
+    private func removeStatusTracking() {
+        guard let button = statusItem?.button else {
+            statusTrackingArea = nil
+            statusToolTipTag = nil
+            return
+        }
+        if let statusTrackingArea { button.removeTrackingArea(statusTrackingArea) }
+        if let statusToolTipTag { button.removeToolTip(statusToolTipTag) }
+        statusTrackingArea = nil
+        statusToolTipTag = nil
+    }
+
     @objc(mouseEntered:)
     private func statusMouseEntered(_ event: NSEvent) {
         updateHoveredStatusProvider(with: event)
@@ -239,7 +327,8 @@ final class MenuBarController: NSObject, NSWindowDelegate {
     }
 
     private func updateHoveredStatusProvider(with event: NSEvent) {
-        guard let button = statusItem.button else { return }
+        guard let button = statusItem?.button
+        else { return }
         let provider = MenuBarStatusLayout.provider(
             at: button.convert(event.locationInWindow, from: nil),
             in: statusDisplays
@@ -265,7 +354,9 @@ final class MenuBarController: NSObject, NSWindowDelegate {
     ) -> String {
         guard let provider = MenuBarStatusLayout.provider(at: point, in: statusDisplays),
               let display = statusDisplays.first(where: { $0.provider == provider })
-        else { return "Open Agents Deck" }
+        else {
+            return "Open Agents Deck."
+        }
         let value = display.percent.map { "\($0)%" } ?? "unavailable"
         return "\(provider.displayName): \(value). Click to open Agents Deck."
     }
@@ -330,7 +421,7 @@ private final class SettingsWindowController: NSWindowController {
         let window = NSWindow(contentViewController: hosting)
         window.title = "Agents Deck Settings"
         window.styleMask = [.titled, .closable, .miniaturizable]
-        window.setContentSize(NSSize(width: 520, height: 520))
+        window.setContentSize(NSSize(width: 560, height: 620))
         window.isReleasedWhenClosed = false
         window.center()
         super.init(window: window)
@@ -359,6 +450,24 @@ enum StatusItemActionResolver {
         case .rightMouseDown, .rightMouseUp: .showContextMenu
         default: .ignore
         }
+    }
+}
+
+enum StatusItemVisibilityPersistence {
+    private static let visibilityKeyPrefix = "NSStatusItem Visible"
+
+    @discardableResult
+    static func clearVisibilityKeys(in defaults: UserDefaults = .standard) -> [String] {
+        let keys = defaults.dictionaryRepresentation().keys
+            .filter { $0.hasPrefix(visibilityKeyPrefix) }
+            .sorted()
+        for key in keys {
+            defaults.removeObject(forKey: key)
+        }
+        if !keys.isEmpty {
+            defaults.synchronize()
+        }
+        return keys
     }
 }
 
