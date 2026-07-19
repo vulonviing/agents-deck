@@ -1,3 +1,5 @@
+![Agents Deck](screenshots/ss1.png)
+
 # Agents Deck
 
 Agents Deck is a small, local-only macOS menu bar app for monitoring verified Claude Code and Codex subscription usage.
