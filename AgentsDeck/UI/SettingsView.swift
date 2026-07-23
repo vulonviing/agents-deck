@@ -5,9 +5,6 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @State private var confirmClearLogs = false
     @State private var confirmClearHistory = false
-    @State private var confirmEnableSessionDetails = false
-    @State private var confirmDisableSessionDetails = false
-    @State private var confirmClearSessionDetails = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -70,21 +67,6 @@ struct SettingsView: View {
                         .deckInteractive(help: "Request macOS permission for usage limit notifications")
                 }
 
-                Section("Claude Session Details") {
-                    Text("Optional local history of documented model, effort, thinking and agent labels. Prompts, responses, paths and session identifiers are never stored.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    if model.state.providers[.claude]?.sessionDetailsEnabled == true {
-                        Button("Disable and Clear…", role: .destructive) { confirmDisableSessionDetails = true }
-                            .deckInteractive(help: "Stop collecting and clear Claude session configuration history")
-                        Button("Clear Session Details History…", role: .destructive) { confirmClearSessionDetails = true }
-                            .deckInteractive(help: "Clear stored session details while keeping collection enabled")
-                    } else {
-                        Button("Enable Session Details…") { confirmEnableSessionDetails = true }
-                            .deckInteractive(help: "Review consent and enable sanitized Claude session details")
-                    }
-                }
-
                 Section("Diagnostics") {
                     if !model.state.historyPersistenceAvailable {
                         Label("Usage history is unavailable for this run.", systemImage: "exclamationmark.triangle")
@@ -114,21 +96,6 @@ struct SettingsView: View {
                 .help("Confirm permanent deletion of usage history")
         } message: {
             Text("This permanently removes stored usage snapshots and notification receipts.")
-        }
-        .confirmationDialog("Enable Claude session details?", isPresented: $confirmEnableSessionDetails) {
-            Button("Enable Session Details") { model.enableClaudeSessionDetails() }
-        } message: {
-            Text("Only Claude's documented model, effort, thinking and agent labels are stored locally for up to 365 days. Prompts, responses, paths and session identifiers are excluded.")
-        }
-        .confirmationDialog("Disable and clear session details?", isPresented: $confirmDisableSessionDetails) {
-            Button("Disable and Clear", role: .destructive) { model.disableClaudeSessionDetails() }
-        } message: {
-            Text("Usage monitoring stays enabled. Stored Claude session configuration history is permanently removed.")
-        }
-        .confirmationDialog("Clear session details history?", isPresented: $confirmClearSessionDetails) {
-            Button("Clear History", role: .destructive) { model.clearSessionDetails() }
-        } message: {
-            Text("Collection remains enabled, but existing session configuration history is permanently removed.")
         }
     }
 

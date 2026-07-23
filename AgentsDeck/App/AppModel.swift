@@ -15,14 +15,11 @@ final class AppModel {
     var state = AppViewState()
     var stateDidChange: (@MainActor (AppViewState) -> Void)?
     private(set) var menuBarProviderSelection: MenuBarProviderSelection
-    private(set) var sessionHistoryRange: SessionHistoryRange
     private(set) var refreshCadence: RefreshCadence
     private(set) var isMenuBarItemVisible: Bool
     var presentedError: String?
     var notificationsGranted = false
     var launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
-    private(set) var sessionConfigurations: [SessionConfigurationPeriod] = []
-    private(set) var sessionHistoryLoading = false
     var menuBarVisibilityDidChange: (@MainActor (Bool) -> Void)?
 
     init(
@@ -34,7 +31,6 @@ final class AppModel {
         let profile = uiProfileStore.load()
         self.uiProfile = profile
         self.menuBarProviderSelection = profile.menuBarProviderSelection
-        self.sessionHistoryRange = profile.sessionHistoryRange
         self.refreshCadence = profile.refreshCadence
         self.isMenuBarItemVisible = profile.menuBarItemVisible
     }
@@ -54,6 +50,10 @@ final class AppModel {
 
     func popoverOpened() {
         Task { await coordinator.popoverOpened() }
+    }
+
+    func providerDetailOpened(_ provider: ProviderID) {
+        Task { await coordinator.providerDetailOpened(provider) }
     }
 
     func refreshNow() {
@@ -89,14 +89,6 @@ final class AppModel {
         isMenuBarItemVisible = visible
         uiProfile.menuBarItemVisible = visible
         persistUIProfile()
-    }
-
-    func setSessionHistoryRange(_ range: SessionHistoryRange) {
-        guard sessionHistoryRange != range else { return }
-        sessionHistoryRange = range
-        uiProfile.sessionHistoryRange = range
-        persistUIProfile()
-        stateDidChange?(state)
     }
 
     func selectedUsageWindow(for provider: ProviderID) -> UsageWindowKind? {
@@ -175,50 +167,6 @@ final class AppModel {
             do { try await coordinator.uninstallClaudeBridge() }
             catch { presentedError = "Claude integration was not removed because its settings changed after installation." }
         }
-    }
-
-    func enableClaudeSessionDetails() {
-        Task {
-            do {
-                try await coordinator.enableClaudeSessionDetails()
-                await loadSessionConfigurations(for: .claude)
-            } catch {
-                presentedError = "Claude session details could not be enabled safely. Your existing settings were not replaced."
-            }
-        }
-    }
-
-    func disableClaudeSessionDetails() {
-        Task {
-            do {
-                try await coordinator.disableClaudeSessionDetails()
-                sessionConfigurations = []
-            } catch {
-                presentedError = "Claude session details could not be disabled because its settings changed after installation."
-            }
-        }
-    }
-
-    func clearSessionDetails() {
-        Task {
-            do {
-                try await coordinator.clearSessionDetails()
-                sessionConfigurations = []
-            } catch {
-                presentedError = "Session details history could not be cleared."
-            }
-        }
-    }
-
-    func loadSessionConfigurations(for provider: ProviderID) async {
-        guard provider == .claude else {
-            sessionConfigurations = []
-            return
-        }
-        sessionHistoryLoading = true
-        let since = Date().addingTimeInterval(-sessionHistoryRange.duration)
-        sessionConfigurations = await coordinator.sessionConfigurations(for: provider, since: since)
-        sessionHistoryLoading = false
     }
 
     func retryCodex() {

@@ -221,39 +221,6 @@ struct HistoryPoint: Identifiable, Equatable, Sendable {
     let durationMinutes: Int
 }
 
-enum SessionMetadataSource: String, Codable, Sendable {
-    case claudeStatusLine
-}
-
-struct SessionConfigurationSnapshot: Codable, Equatable, Sendable {
-    let provider: ProviderID
-    let capturedAt: Date
-    let source: SessionMetadataSource
-    let modelID: String
-    let modelDisplayName: String?
-    let effort: String?
-    let thinkingEnabled: Bool?
-    let agentName: String?
-
-    var configurationKey: String {
-        [modelID, modelDisplayName ?? "", effort ?? "", thinkingEnabled.map(String.init) ?? "", agentName ?? ""]
-            .joined(separator: "\u{1F}")
-    }
-}
-
-struct SessionConfigurationPeriod: Identifiable, Equatable, Sendable {
-    let id: UUID
-    let provider: ProviderID
-    let firstSeenAt: Date
-    let lastSeenAt: Date
-    let source: SessionMetadataSource
-    let modelID: String
-    let modelDisplayName: String?
-    let effort: String?
-    let thinkingEnabled: Bool?
-    let agentName: String?
-}
-
 struct ProviderViewState: Equatable, Sendable {
     let provider: ProviderID
     var connection: ProviderConnectionState = .disconnected
@@ -264,8 +231,8 @@ struct ProviderViewState: Equatable, Sendable {
     var executableVersion: String?
     var restartCount = 0
     var bridgeInstalled = false
-    var sessionDetailsEnabled = false
-    var latestSessionConfiguration: SessionConfigurationSnapshot?
+    var codexAccount: CodexAccountSnapshot?
+    var codexActivityState: CodexActivityState = .waiting
 
     static func empty(_ provider: ProviderID) -> Self {
         Self(provider: provider)

@@ -22,31 +22,6 @@ enum MenuBarProviderSelection: String, Codable, CaseIterable, Sendable {
     }
 }
 
-enum SessionHistoryRange: String, Codable, CaseIterable, Sendable {
-    case twentyFourHours
-    case sevenDays
-    case oneMonth
-    case oneYear
-
-    var displayName: String {
-        switch self {
-        case .twentyFourHours: "24 hours"
-        case .sevenDays: "7 days"
-        case .oneMonth: "1 month"
-        case .oneYear: "1 year"
-        }
-    }
-
-    var duration: TimeInterval {
-        switch self {
-        case .twentyFourHours: 24 * 60 * 60
-        case .sevenDays: 7 * 24 * 60 * 60
-        case .oneMonth: 30 * 24 * 60 * 60
-        case .oneYear: 365 * 24 * 60 * 60
-        }
-    }
-}
-
 enum RefreshCadence: String, Codable, CaseIterable, Sendable {
     case oneToThreeMinutes
     case threeToFiveMinutes
@@ -79,7 +54,6 @@ struct DeckUIProfile: Codable, Equatable {
     var schemaVersion = currentSchemaVersion
     var selectedUsageWindowByProvider: [ProviderID: UsageWindowKind] = [:]
     var menuBarProviderSelection: MenuBarProviderSelection = .both
-    var sessionHistoryRange: SessionHistoryRange = .sevenDays
     var refreshCadence: RefreshCadence = .oneToThreeMinutes
     var menuBarItemVisible = true
     var panelWidth: Double?
@@ -94,7 +68,6 @@ extension DeckUIProfile {
         case schemaVersion
         case selectedUsageWindowByProvider
         case menuBarProviderSelection
-        case sessionHistoryRange
         case refreshCadence
         case menuBarItemVisible
         case panelWidth
@@ -117,10 +90,6 @@ extension DeckUIProfile {
                 MenuBarProviderSelection.self,
                 forKey: .menuBarProviderSelection
             ) ?? .both
-            sessionHistoryRange = try values.decodeIfPresent(
-                SessionHistoryRange.self,
-                forKey: .sessionHistoryRange
-            ) ?? .sevenDays
         } else {
             let provider = try values.decodeIfPresent(ProviderID.self, forKey: .selectedMenuBarProviderID)
             let mode = try values.decodeIfPresent(LegacyMenuBarDisplayMode.self, forKey: .menuBarDisplayMode)
@@ -131,7 +100,6 @@ extension DeckUIProfile {
             case (.single, .codex): .codex
             case (.single, nil): .both
             }
-            sessionHistoryRange = .sevenDays
         }
         refreshCadence = try values.decodeIfPresent(RefreshCadence.self, forKey: .refreshCadence) ?? .oneToThreeMinutes
         menuBarItemVisible = try values.decodeIfPresent(Bool.self, forKey: .menuBarItemVisible) ?? true
@@ -145,7 +113,6 @@ extension DeckUIProfile {
         try values.encode(Self.currentSchemaVersion, forKey: .schemaVersion)
         try values.encode(selectedUsageWindowByProvider, forKey: .selectedUsageWindowByProvider)
         try values.encode(menuBarProviderSelection, forKey: .menuBarProviderSelection)
-        try values.encode(sessionHistoryRange, forKey: .sessionHistoryRange)
         try values.encode(refreshCadence, forKey: .refreshCadence)
         try values.encode(menuBarItemVisible, forKey: .menuBarItemVisible)
         try values.encodeIfPresent(panelWidth, forKey: .panelWidth)

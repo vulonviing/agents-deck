@@ -13,7 +13,7 @@ actor UsageCoordinator {
     private var eventTask: Task<Void, Never>?
     private var pollTask: Task<Void, Never>?
     private var notificationRefreshTask: Task<Void, Never>?
-    private var providerRefreshTasks: [ProviderID: Task<UsageSnapshot, Error>] = [:]
+    private var providerRefreshTasks: [ProviderID: Task<ProviderRefreshResult, Error>] = [:]
     private var manualRefreshID: UUID?
     private var started = false
     private var lastPruneDay: Date?
@@ -21,6 +21,10 @@ actor UsageCoordinator {
     private var refreshCadence: RefreshCadence = .oneToThreeMinutes
     private var nextScheduledRefresh: [ProviderID: Date] = [:]
     private var nextMaintenanceAt: Date?
+    private var nextCodexActivityAt: Date?
+
+    private static let codexActivityInterval: TimeInterval = 15 * 60
+    private static let codexActivityFreshness: TimeInterval = 30 * 60
 
     init(
         claude: any ClaudeUsageProviding = ClaudeProvider(),
@@ -115,6 +119,12 @@ actor UsageCoordinator {
         restartPollTask()
     }
 
+    func providerDetailOpened(_ provider: ProviderID) async {
+        guard provider == .codex else { return }
+        await requestRefresh(.codex, reason: .detailOpened, policy: .coalesce)
+        restartPollTask()
+    }
+
     func manualRefresh() async {
         let requestID = UUID()
         manualRefreshID = requestID
@@ -162,34 +172,7 @@ actor UsageCoordinator {
     func uninstallClaudeBridge() async throws {
         try await claude.uninstallBridge()
         state.providers[.claude]?.bridgeInstalled = false
-        state.providers[.claude]?.sessionDetailsEnabled = false
-        state.providers[.claude]?.latestSessionConfiguration = nil
-        try await history.clearSessionConfigurations()
         await publish()
-    }
-
-    func enableClaudeSessionDetails() async throws {
-        try await claude.enableSessionDetails()
-        state.providers[.claude]?.sessionDetailsEnabled = true
-        await publish()
-    }
-
-    func disableClaudeSessionDetails() async throws {
-        try await claude.disableSessionDetails()
-        try await history.clearSessionConfigurations()
-        state.providers[.claude]?.sessionDetailsEnabled = false
-        state.providers[.claude]?.latestSessionConfiguration = nil
-        await publish()
-    }
-
-    func clearSessionDetails() async throws {
-        try await history.clearSessionConfigurations()
-        state.providers[.claude]?.latestSessionConfiguration = nil
-        await publish()
-    }
-
-    func sessionConfigurations(for provider: ProviderID, since: Date) async -> [SessionConfigurationPeriod] {
-        (try? await history.sessionConfigurations(for: provider, since: since)) ?? []
     }
 
     func requestNotificationAuthorization() async -> Bool {
@@ -199,6 +182,8 @@ actor UsageCoordinator {
     func clearHistory() async throws {
         try await history.clearHistory()
         try await history.clearReceipts()
+        state.providers[.codex]?.codexAccount = nil
+        state.providers[.codex]?.codexActivityState = .waiting
         await publish()
     }
 
@@ -235,14 +220,6 @@ actor UsageCoordinator {
                 self.scheduleNext(for: .codex, from: Date())
                 self.restartPollTask()
             }
-        case let .sessionConfiguration(snapshot):
-            if state.providers[snapshot.provider]?.latestSessionConfiguration.map({
-                snapshot.capturedAt >= $0.capturedAt
-            }) ?? true {
-                state.providers[snapshot.provider]?.latestSessionConfiguration = snapshot
-            }
-            try? await history.recordSessionConfiguration(snapshot)
-            await diagnostics.log(.info, category: "provider", event: "session_metadata_verified", provider: snapshot.provider)
         }
         await publish()
     }
@@ -252,16 +229,47 @@ actor UsageCoordinator {
             guard let snapshot = try? await history.latestSnapshot(for: provider) else { continue }
             await acceptSnapshot(snapshot, persist: false, evaluateNotifications: false, now: now)
         }
-        if let latest = try? await history.sessionConfigurations(
-            for: .claude,
-            since: now.addingTimeInterval(-365 * 24 * 60 * 60)
-        ).first {
-            state.providers[.claude]?.latestSessionConfiguration = SessionConfigurationSnapshot(
-                provider: latest.provider, capturedAt: latest.lastSeenAt, source: latest.source,
-                modelID: latest.modelID, modelDisplayName: latest.modelDisplayName,
-                effort: latest.effort, thinkingEnabled: latest.thinkingEnabled, agentName: latest.agentName
-            )
+        if let account = try? await history.latestCodexAccount() {
+            state.providers[.codex]?.codexAccount = account
+            if let activity = account.tokenActivity {
+                state.providers[.codex]?.codexActivityState = now.timeIntervalSince(activity.capturedAt)
+                    <= Self.codexActivityFreshness ? .available : .stale
+            }
         }
+    }
+
+    private func acceptSupplement(
+        _ supplement: ProviderSupplement,
+        persist: Bool,
+        now: Date = Date()
+    ) async {
+        guard case let .codex(refresh) = supplement else { return }
+        var account = state.providers[.codex]?.codexAccount
+            ?? .empty
+        account.resetCredits = refresh.resetCredits
+
+        switch refresh.tokenActivity {
+        case .notRequested:
+            break
+        case let .verified(activity):
+            if account.tokenActivity.map({ activity.capturedAt >= $0.capturedAt }) ?? true {
+                account.tokenActivity = activity
+            }
+            state.providers[.codex]?.codexActivityState = .available
+            nextCodexActivityAt = now.addingTimeInterval(Self.codexActivityInterval)
+        case .unavailable:
+            state.providers[.codex]?.codexActivityState = account.tokenActivity == nil ? .unavailable : .stale
+            nextCodexActivityAt = now.addingTimeInterval(Self.codexActivityInterval)
+        case let .failed(code):
+            state.providers[.codex]?.codexActivityState = account.tokenActivity == nil ? .failed(code) : .stale
+            nextCodexActivityAt = now.addingTimeInterval(Self.codexActivityInterval)
+        }
+
+        state.providers[.codex]?.codexAccount = account
+        if persist, account.tokenActivity != nil || account.resetCredits != nil {
+            try? await history.recordCodexAccount(account)
+        }
+        await diagnostics.log(.info, category: "provider", event: "codex_account_snapshot_updated", provider: .codex)
     }
 
     private func acceptSnapshot(
@@ -320,6 +328,12 @@ actor UsageCoordinator {
             state.providers[provider]?.connection = .stale
         }
 
+        if state.providers[.codex]?.codexActivityState == .available,
+           let activity = state.providers[.codex]?.codexAccount?.tokenActivity,
+           now.timeIntervalSince(activity.capturedAt) > Self.codexActivityFreshness {
+            state.providers[.codex]?.codexActivityState = .stale
+        }
+
         if lastPruneDay.map({ !Calendar.current.isDate($0, inSameDayAs: now) }) ?? true {
             try? await history.prune(before: now.addingTimeInterval(-365 * 24 * 60 * 60))
             await diagnostics.performMaintenance(now: now)
@@ -330,9 +344,7 @@ actor UsageCoordinator {
 
     private func publish() async {
         let isClaudeBridgeInstalled = await claude.isBridgeInstalled()
-        let sessionDetailsEnabled = await claude.isSessionDetailsEnabled()
         state.providers[.claude]?.bridgeInstalled = isClaudeBridgeInstalled
-        state.providers[.claude]?.sessionDetailsEnabled = sessionDetailsEnabled
         state.criticalProviderID = UsageAlgorithms.criticalProvider(
             in: Array(state.providers.values),
             keeping: state.criticalProviderID
@@ -349,7 +361,8 @@ actor UsageCoordinator {
     private func runPollLoop() async {
         while !Task.isCancelled {
             let now = Date()
-            let deadlines = Array(nextScheduledRefresh.values) + [nextMaintenanceAt ?? now]
+            let deadlines = Array(nextScheduledRefresh.values)
+                + [nextMaintenanceAt ?? now, nextCodexActivityAt ?? now]
             guard let deadline = deadlines.min() else { return }
             let milliseconds = max(1, Int(deadline.timeIntervalSince(now) * 1_000))
             do { try await Task.sleep(for: .milliseconds(milliseconds)) } catch { return }
@@ -358,14 +371,26 @@ actor UsageCoordinator {
             let dueProviders = ProviderID.allCases.filter {
                 nextScheduledRefresh[$0].map { $0 <= wakeTime } ?? true
             }
+            let codexActivityDue = nextCodexActivityAt.map { $0 <= wakeTime } ?? true
             for provider in dueProviders {
                 scheduleNext(for: provider, from: wakeTime)
+            }
+            if codexActivityDue {
+                nextCodexActivityAt = wakeTime.addingTimeInterval(Self.codexActivityInterval)
             }
 
             await withTaskGroup(of: Void.self) { group in
                 for provider in dueProviders {
+                    let reason: ProviderRefreshReason = provider == .codex && codexActivityDue
+                        ? .scheduledActivity
+                        : .scheduled
                     group.addTask {
-                        await self.requestRefresh(provider, reason: .scheduled, policy: .coalesce)
+                        await self.requestRefresh(provider, reason: reason, policy: .coalesce)
+                    }
+                }
+                if codexActivityDue, !dueProviders.contains(.codex) {
+                    group.addTask {
+                        await self.requestRefresh(.codex, reason: .scheduledActivity, policy: .coalesce)
                     }
                 }
             }
@@ -380,6 +405,9 @@ actor UsageCoordinator {
     private func rescheduleAll(from now: Date) {
         for provider in ProviderID.allCases {
             scheduleNext(for: provider, from: now)
+        }
+        if nextCodexActivityAt == nil {
+            nextCodexActivityAt = now.addingTimeInterval(Self.codexActivityInterval)
         }
         nextMaintenanceAt = now.addingTimeInterval(60)
     }
@@ -427,7 +455,7 @@ actor UsageCoordinator {
             event: "started_\(reason.logValue)",
             provider: provider
         )
-        let task: Task<UsageSnapshot, Error>
+        let task: Task<ProviderRefreshResult, Error>
         switch provider {
         case .claude:
             task = Task { [claude] in try await claude.refresh(reason: reason) }
@@ -440,8 +468,11 @@ actor UsageCoordinator {
         guard started, state.providers[provider]?.refreshID == refreshID else { return }
         providerRefreshTasks[provider] = nil
         switch result {
-        case let .success(snapshot):
-            await acceptSnapshot(snapshot, persist: true, evaluateNotifications: true)
+        case let .success(refresh):
+            await acceptSnapshot(refresh.snapshot, persist: true, evaluateNotifications: true)
+            if let supplement = refresh.supplement {
+                await acceptSupplement(supplement, persist: true)
+            }
             await diagnostics.log(
                 .info,
                 category: "refresh",
@@ -520,6 +551,8 @@ private extension ProviderRefreshReason {
         case .popoverOpened: "popover_opened"
         case .providerNotification: "provider_notification"
         case .manual: "manual"
+        case .scheduledActivity: "scheduled_activity"
+        case .detailOpened: "detail_opened"
         }
     }
 }

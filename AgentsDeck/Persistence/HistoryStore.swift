@@ -138,6 +138,35 @@ final class LatestUsageRecord {
 }
 
 @Model
+final class LatestCodexAccountRecord {
+    @Attribute(.unique) var key: String
+    var capturedAt: Date
+    var payload: Data
+
+    init(snapshot: CodexAccountSnapshot) throws {
+        key = ProviderID.codex.rawValue
+        capturedAt = Self.latestCapture(in: snapshot)
+        payload = try JSONEncoder().encode(snapshot)
+    }
+
+    func update(with snapshot: CodexAccountSnapshot) throws {
+        capturedAt = Self.latestCapture(in: snapshot)
+        payload = try JSONEncoder().encode(snapshot)
+    }
+
+    func snapshot() -> CodexAccountSnapshot? {
+        try? JSONDecoder().decode(CodexAccountSnapshot.self, from: payload)
+    }
+
+    private static func latestCapture(in snapshot: CodexAccountSnapshot) -> Date {
+        max(
+            snapshot.tokenActivity?.capturedAt ?? .distantPast,
+            snapshot.resetCredits?.capturedAt ?? .distantPast
+        )
+    }
+}
+
+@Model
 final class NotificationReceipt {
     @Attribute(.unique) var key: String
     var createdAt: Date
@@ -145,54 +174,6 @@ final class NotificationReceipt {
     init(key: String, createdAt: Date = Date()) {
         self.key = key
         self.createdAt = createdAt
-    }
-}
-
-@Model
-final class SessionConfigurationRecord {
-    @Attribute(.unique) var id: UUID
-    var providerRaw: String
-    var firstSeenAt: Date
-    var lastSeenAt: Date
-    var sourceRaw: String
-    var modelID: String
-    var modelDisplayName: String?
-    var effort: String?
-    var thinkingEnabled: Bool?
-    var agentName: String?
-
-    init(snapshot: SessionConfigurationSnapshot) {
-        id = UUID()
-        providerRaw = snapshot.provider.rawValue
-        firstSeenAt = snapshot.capturedAt
-        lastSeenAt = snapshot.capturedAt
-        sourceRaw = snapshot.source.rawValue
-        modelID = snapshot.modelID
-        modelDisplayName = snapshot.modelDisplayName
-        effort = snapshot.effort
-        thinkingEnabled = snapshot.thinkingEnabled
-        agentName = snapshot.agentName
-    }
-
-    func matches(_ snapshot: SessionConfigurationSnapshot) -> Bool {
-        providerRaw == snapshot.provider.rawValue
-            && sourceRaw == snapshot.source.rawValue
-            && modelID == snapshot.modelID
-            && modelDisplayName == snapshot.modelDisplayName
-            && effort == snapshot.effort
-            && thinkingEnabled == snapshot.thinkingEnabled
-            && agentName == snapshot.agentName
-    }
-
-    func period() -> SessionConfigurationPeriod? {
-        guard let provider = ProviderID(rawValue: providerRaw),
-              let source = SessionMetadataSource(rawValue: sourceRaw)
-        else { return nil }
-        return SessionConfigurationPeriod(
-            id: id, provider: provider, firstSeenAt: firstSeenAt, lastSeenAt: lastSeenAt,
-            source: source, modelID: modelID, modelDisplayName: modelDisplayName,
-            effort: effort, thinkingEnabled: thinkingEnabled, agentName: agentName
-        )
     }
 }
 
@@ -206,9 +187,8 @@ protocol HistoryStoring: Sendable {
     func prune(before cutoff: Date) async throws
     func clearHistory() async throws
     func clearReceipts() async throws
-    func recordSessionConfiguration(_ snapshot: SessionConfigurationSnapshot) async throws
-    func sessionConfigurations(for provider: ProviderID, since: Date) async throws -> [SessionConfigurationPeriod]
-    func clearSessionConfigurations() async throws
+    func recordCodexAccount(_ snapshot: CodexAccountSnapshot) async throws
+    func latestCodexAccount() async throws -> CodexAccountSnapshot?
 }
 
 @ModelActor
@@ -217,7 +197,12 @@ actor SwiftDataHistoryStore: HistoryStoring {
 
     static func makeLive(paths: AppPaths = .live()) throws -> SwiftDataHistoryStore {
         try HistoryStoreMigration.prepare(paths: paths)
-        let schema = Schema([UsageRecord.self, LatestUsageRecord.self, NotificationReceipt.self, SessionConfigurationRecord.self])
+        let schema = Schema([
+            UsageRecord.self,
+            LatestUsageRecord.self,
+            LatestCodexAccountRecord.self,
+            NotificationReceipt.self,
+        ])
         let configuration = ModelConfiguration(
             "AgentsDeckHistory",
             schema: schema,
@@ -306,9 +291,6 @@ actor SwiftDataHistoryStore: HistoryStoring {
         for record in try modelContext.fetch(FetchDescriptor<UsageRecord>()) where record.capturedAt < cutoff {
             modelContext.delete(record)
         }
-        for record in try modelContext.fetch(FetchDescriptor<SessionConfigurationRecord>()) where record.lastSeenAt < cutoff {
-            modelContext.delete(record)
-        }
         let receiptCutoff = cutoff.addingTimeInterval(-35 * 24 * 60 * 60)
         for receipt in try modelContext.fetch(FetchDescriptor<NotificationReceipt>()) where receipt.createdAt < receiptCutoff {
             modelContext.delete(receipt)
@@ -319,6 +301,7 @@ actor SwiftDataHistoryStore: HistoryStoring {
     func clearHistory() throws {
         try modelContext.delete(model: UsageRecord.self)
         try modelContext.delete(model: LatestUsageRecord.self)
+        try modelContext.delete(model: LatestCodexAccountRecord.self)
         try modelContext.save()
     }
 
@@ -327,29 +310,20 @@ actor SwiftDataHistoryStore: HistoryStoring {
         try modelContext.save()
     }
 
-    func recordSessionConfiguration(_ snapshot: SessionConfigurationSnapshot) throws {
-        let records = try modelContext.fetch(FetchDescriptor<SessionConfigurationRecord>(
-            sortBy: [SortDescriptor(\.lastSeenAt, order: .reverse)]
-        )).filter { $0.providerRaw == snapshot.provider.rawValue }
-        if let latest = records.first, latest.matches(snapshot) {
-            latest.lastSeenAt = max(latest.lastSeenAt, snapshot.capturedAt)
+    func recordCodexAccount(_ snapshot: CodexAccountSnapshot) throws {
+        let records = try modelContext.fetch(FetchDescriptor<LatestCodexAccountRecord>())
+        if let existing = records.first(where: { $0.key == ProviderID.codex.rawValue }) {
+            try existing.update(with: snapshot)
         } else {
-            modelContext.insert(SessionConfigurationRecord(snapshot: snapshot))
+            modelContext.insert(try LatestCodexAccountRecord(snapshot: snapshot))
         }
         try modelContext.save()
     }
 
-    func sessionConfigurations(for provider: ProviderID, since: Date) throws -> [SessionConfigurationPeriod] {
-        try modelContext.fetch(FetchDescriptor<SessionConfigurationRecord>(
-            sortBy: [SortDescriptor(\.lastSeenAt, order: .reverse)]
-        )).filter {
-            $0.providerRaw == provider.rawValue && $0.lastSeenAt >= since
-        }.compactMap { $0.period() }
-    }
-
-    func clearSessionConfigurations() throws {
-        try modelContext.delete(model: SessionConfigurationRecord.self)
-        try modelContext.save()
+    func latestCodexAccount() throws -> CodexAccountSnapshot? {
+        try modelContext.fetch(FetchDescriptor<LatestCodexAccountRecord>())
+            .first(where: { $0.key == ProviderID.codex.rawValue })?
+            .snapshot()
     }
 
     private nonisolated static func minuteKey(for snapshot: UsageSnapshot) -> String {
@@ -363,7 +337,7 @@ actor InMemoryHistoryStore: HistoryStoring {
     private var snapshots: [UsageSnapshot] = []
     private var latestSnapshots: [ProviderID: UsageSnapshot] = [:]
     private var receipts: [String: Date] = [:]
-    private var sessionPeriods: [SessionConfigurationPeriod] = []
+    private var codexAccount: CodexAccountSnapshot?
 
     func record(_ snapshot: UsageSnapshot) {
         latestSnapshots[snapshot.provider] = snapshot
@@ -402,50 +376,15 @@ actor InMemoryHistoryStore: HistoryStoring {
     func saveReceipt(_ key: String) { receipts[key] = Date() }
     func prune(before cutoff: Date) {
         snapshots.removeAll { $0.capturedAt < cutoff }
-        sessionPeriods.removeAll { $0.lastSeenAt < cutoff }
     }
     func clearHistory() {
         snapshots.removeAll()
         latestSnapshots.removeAll()
+        codexAccount = nil
     }
     func clearReceipts() { receipts.removeAll() }
-
-    func recordSessionConfiguration(_ snapshot: SessionConfigurationSnapshot) {
-        if let latestIndex = sessionPeriods.indices.filter({
-            sessionPeriods[$0].provider == snapshot.provider
-        }).max(by: {
-            sessionPeriods[$0].lastSeenAt < sessionPeriods[$1].lastSeenAt
-        }) {
-            let latest = sessionPeriods[latestIndex]
-            let matches = latest.modelID == snapshot.modelID
-                && latest.modelDisplayName == snapshot.modelDisplayName
-                && latest.effort == snapshot.effort
-                && latest.thinkingEnabled == snapshot.thinkingEnabled
-                && latest.agentName == snapshot.agentName
-            if matches {
-                sessionPeriods[latestIndex] = SessionConfigurationPeriod(
-                    id: latest.id, provider: latest.provider, firstSeenAt: latest.firstSeenAt,
-                    lastSeenAt: max(latest.lastSeenAt, snapshot.capturedAt), source: latest.source,
-                    modelID: latest.modelID, modelDisplayName: latest.modelDisplayName,
-                    effort: latest.effort, thinkingEnabled: latest.thinkingEnabled, agentName: latest.agentName
-                )
-                return
-            }
-        }
-        sessionPeriods.append(SessionConfigurationPeriod(
-            id: UUID(), provider: snapshot.provider, firstSeenAt: snapshot.capturedAt,
-            lastSeenAt: snapshot.capturedAt, source: snapshot.source, modelID: snapshot.modelID,
-            modelDisplayName: snapshot.modelDisplayName, effort: snapshot.effort,
-            thinkingEnabled: snapshot.thinkingEnabled, agentName: snapshot.agentName
-        ))
-    }
-
-    func sessionConfigurations(for provider: ProviderID, since: Date) -> [SessionConfigurationPeriod] {
-        sessionPeriods.filter { $0.provider == provider && $0.lastSeenAt >= since }
-            .sorted { $0.lastSeenAt > $1.lastSeenAt }
-    }
-
-    func clearSessionConfigurations() { sessionPeriods.removeAll() }
+    func recordCodexAccount(_ snapshot: CodexAccountSnapshot) { codexAccount = snapshot }
+    func latestCodexAccount() -> CodexAccountSnapshot? { codexAccount }
 }
 
 enum HistoryStoreFactory {
@@ -502,7 +441,12 @@ enum HistoryStoreMigration {
             )
         }
 
-        let schema = Schema([UsageRecord.self, LatestUsageRecord.self, NotificationReceipt.self, SessionConfigurationRecord.self])
+        let schema = Schema([
+            UsageRecord.self,
+            LatestUsageRecord.self,
+            LatestCodexAccountRecord.self,
+            NotificationReceipt.self,
+        ])
         let configuration = ModelConfiguration(
             "AgentsDeckHistoryMigration",
             schema: schema,

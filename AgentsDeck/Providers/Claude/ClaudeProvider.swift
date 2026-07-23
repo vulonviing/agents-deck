@@ -55,7 +55,7 @@ actor ClaudeProvider: ClaudeUsageProviding {
         }
     }
 
-    func refresh(reason: ProviderRefreshReason) async throws -> UsageSnapshot {
+    func refresh(reason: ProviderRefreshReason) async throws -> ProviderRefreshResult {
         _ = reason
         if installer.isInstalled() {
             _ = try? loadCapture()
@@ -68,7 +68,7 @@ actor ClaudeProvider: ClaudeUsageProviding {
         try Task.checkCancellation()
         let snapshot = verifiedResetCache.merge(probedSnapshot)
         latestSnapshotAt = max(latestSnapshotAt ?? .distantPast, snapshot.capturedAt)
-        return snapshot
+        return ProviderRefreshResult(snapshot: snapshot)
     }
 
     func installBridge() async throws {
@@ -76,21 +76,6 @@ actor ClaudeProvider: ClaudeUsageProviding {
         startDirectoryObservation()
         if latestSnapshotAt == nil { continuation.yield(.connection(id, .waiting)) }
         await readCapture()
-        await readSessionCapture()
-    }
-
-    func enableSessionDetails() async throws {
-        try installer.enableSessionDetails()
-        startDirectoryObservation()
-        await readSessionCapture()
-    }
-
-    func disableSessionDetails() async throws {
-        try installer.disableSessionDetails()
-    }
-
-    func isSessionDetailsEnabled() async -> Bool {
-        installer.isSessionDetailsEnabled()
     }
 
     func uninstallBridge() async throws {
@@ -138,7 +123,6 @@ actor ClaudeProvider: ClaudeUsageProviding {
             if installer.isInstalled() {
                 startDirectoryObservation()
                 await readCapture()
-                await readSessionCapture()
             } else {
                 continuation.yield(.connection(id, .waiting))
             }
@@ -179,14 +163,6 @@ actor ClaudeProvider: ClaudeUsageProviding {
         return verifiedResetCache.merge(try ClaudePayloadParser.parse(data))
     }
 
-    private func readSessionCapture() async {
-        guard installer.isSessionDetailsEnabled(),
-              let data = try? Data(contentsOf: paths.claudeSessionCapture, options: [.mappedIfSafe]),
-              let snapshot = try? ClaudeSessionMetadataParser.parse(data)
-        else { return }
-        continuation.yield(.sessionConfiguration(snapshot))
-    }
-
     private func startDirectoryObservation() {
         guard directorySource == nil else { return }
         do {
@@ -210,7 +186,6 @@ actor ClaudeProvider: ClaudeUsageProviding {
             guard let self else { return }
             Task {
                 await self.readCapture()
-                await self.readSessionCapture()
             }
         }
         source.setCancelHandler { close(descriptor) }
