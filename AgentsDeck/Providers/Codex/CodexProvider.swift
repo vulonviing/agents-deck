@@ -16,6 +16,7 @@ actor CodexProvider: CodexUsageProviding {
     private var connectedSince: Date?
     private var stopped = false
     private var refreshInFlight = false
+    private var lastActivityAttemptAt: Date?
 
     init(
         locator: ExecutableLocator = ExecutableLocator(),
@@ -53,7 +54,7 @@ actor CodexProvider: CodexUsageProviding {
         }
     }
 
-    func refresh(reason: ProviderRefreshReason) async throws -> UsageSnapshot {
+    func refresh(reason: ProviderRefreshReason) async throws -> ProviderRefreshResult {
         guard !refreshInFlight else { throw ProviderBoundaryError.retryPaused }
         if client == nil, reason == .manual {
             await start()
@@ -63,7 +64,7 @@ actor CodexProvider: CodexUsageProviding {
         }
         refreshInFlight = true
         defer { refreshInFlight = false }
-        return try await refresh(using: client)
+        return try await refresh(using: client, reason: reason)
     }
 
     func stop() async {
@@ -72,6 +73,7 @@ actor CodexProvider: CodexUsageProviding {
         clientEventTask?.cancel()
         await client?.stop()
         client = nil
+        lastActivityAttemptAt = nil
         continuation.yield(.connection(id, .disconnected))
     }
 
@@ -82,15 +84,69 @@ actor CodexProvider: CodexUsageProviding {
         await start()
     }
 
-    private func refresh(using client: CodexAppServerClient) async throws -> UsageSnapshot {
+    private func refresh(
+        using client: CodexAppServerClient,
+        reason: ProviderRefreshReason
+    ) async throws -> ProviderRefreshResult {
+        let now = Date()
+        let shouldFetchActivity = shouldFetchActivity(for: reason, now: now)
+        let activityTask: Task<JSONValue, Error>? = if shouldFetchActivity {
+            Task { try await client.accountUsage() }
+        } else {
+            nil
+        }
+        if shouldFetchActivity { lastActivityAttemptAt = now }
+
+        defer { activityTask?.cancel() }
         let response = try await client.rateLimits()
         try Task.checkCancellation()
-        let snapshot = try CodexRateLimitParser.parse(response)
+        let parsed = try CodexRateLimitParser.parseRefresh(response, now: now)
+        let tokenActivity = await tokenActivityResult(from: activityTask, now: now)
         connectedSince = connectedSince ?? Date()
         if let connectedSince, Date().timeIntervalSince(connectedSince) >= 5 * 60 {
             failures.removeAll()
         }
-        return snapshot
+        return ProviderRefreshResult(
+            snapshot: parsed.snapshot,
+            supplement: .codex(CodexSupplementalRefresh(
+                resetCredits: parsed.resetCredits,
+                tokenActivity: tokenActivity
+            ))
+        )
+    }
+
+    private func shouldFetchActivity(for reason: ProviderRefreshReason, now: Date) -> Bool {
+        let age = lastActivityAttemptAt.map { now.timeIntervalSince($0) }
+        switch reason {
+        case .startup, .manual, .scheduledActivity:
+            return true
+        case .popoverOpened, .detailOpened:
+            return age.map { $0 >= 60 } ?? true
+        case .scheduled, .providerNotification:
+            return false
+        }
+    }
+
+    private func tokenActivityResult(
+        from task: Task<JSONValue, Error>?,
+        now: Date
+    ) async -> CodexTokenActivityRefresh {
+        guard let task else { return .notRequested }
+        switch await task.result {
+        case let .success(response):
+            do { return .verified(try CodexTokenActivityParser.parse(response, now: now)) }
+            catch let error as ProviderBoundaryError { return .failed(error.code) }
+            catch { return .failed(.invalidPayload) }
+        case .failure(is CancellationError):
+            return .failed(.unknown)
+        case let .failure(error as ProviderBoundaryError):
+            if error == .unsupportedProtocol || error == .authenticationRequired {
+                return .unavailable
+            }
+            return .failed(error.code)
+        case .failure:
+            return .failed(.processFailed)
+        }
     }
 
     private func launchClient(_ executable: URL) async {

@@ -239,6 +239,7 @@ struct ClaudeVerifiedResetCache {
     private struct Entry {
         let reset: Date
         let durationMinutes: Int
+        let capturedAt: Date
     }
 
     private var entries: [UsageWindowKind: Entry] = [:]
@@ -250,9 +251,29 @@ struct ClaudeVerifiedResetCache {
         for kind in UsageWindowKind.allCases {
             guard let window = windows[kind] else { continue }
 
+            // Claude has two independent snapshot sources (the status-line bridge and the
+            // /usage probe) merging through this same cache. A delayed, out-of-order result
+            // (older capturedAt than what already established the current entry) must not
+            // clear or overwrite it -- only apply carry-forward to this result's own return
+            // value, and leave the shared cache alone for later, genuinely newer snapshots.
+            if let existing = entries[kind], snapshot.capturedAt < existing.capturedAt {
+                if window.resetsAt == nil,
+                   existing.durationMinutes == window.durationMinutes,
+                   existing.reset > snapshot.capturedAt,
+                   existing.reset <= latestAllowedReset {
+                    windows[kind] = UsageWindow(
+                        kind: window.kind,
+                        usedPercent: window.usedPercent,
+                        resetsAt: existing.reset,
+                        durationMinutes: window.durationMinutes
+                    )
+                }
+                continue
+            }
+
             if let reset = window.resetsAt {
                 if reset > snapshot.capturedAt, reset <= latestAllowedReset {
-                    entries[kind] = Entry(reset: reset, durationMinutes: window.durationMinutes)
+                    entries[kind] = Entry(reset: reset, durationMinutes: window.durationMinutes, capturedAt: snapshot.capturedAt)
                 } else {
                     entries[kind] = nil
                 }

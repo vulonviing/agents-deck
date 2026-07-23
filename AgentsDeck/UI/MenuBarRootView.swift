@@ -128,7 +128,9 @@ struct MenuBarRootView: View {
                             ProviderCardView(
                                 state: model.state.providers[provider] ?? .empty(provider),
                                 preferredKind: model.selectedUsageWindow(for: provider),
-                                onShowDetails: { detailProvider = provider },
+                                onShowDetails: {
+                                    detailProvider = provider
+                                },
                                 onSelectWindow: { model.selectUsageWindow($0, for: provider) }
                             )
                         }

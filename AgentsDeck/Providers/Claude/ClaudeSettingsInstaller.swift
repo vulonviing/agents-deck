@@ -4,17 +4,15 @@ struct ClaudeInstallManifest: Codable, Sendable {
     let installedCommand: String
     let originalStatusLineJSON: Data?
     let installedAt: Date
-    var capturesSessionDetails: Bool
 
-    init(installedCommand: String, originalStatusLineJSON: Data?, installedAt: Date, capturesSessionDetails: Bool = false) {
+    init(installedCommand: String, originalStatusLineJSON: Data?, installedAt: Date) {
         self.installedCommand = installedCommand
         self.originalStatusLineJSON = originalStatusLineJSON
         self.installedAt = installedAt
-        self.capturesSessionDetails = capturesSessionDetails
     }
 
     private enum CodingKeys: String, CodingKey {
-        case installedCommand, originalStatusLineJSON, installedAt, capturesSessionDetails
+        case installedCommand, originalStatusLineJSON, installedAt
     }
 
     init(from decoder: Decoder) throws {
@@ -22,7 +20,6 @@ struct ClaudeInstallManifest: Codable, Sendable {
         installedCommand = try values.decode(String.self, forKey: .installedCommand)
         originalStatusLineJSON = try values.decodeIfPresent(Data.self, forKey: .originalStatusLineJSON)
         installedAt = try values.decode(Date.self, forKey: .installedAt)
-        capturesSessionDetails = try values.decodeIfPresent(Bool.self, forKey: .capturesSessionDetails) ?? false
     }
 }
 
@@ -63,7 +60,7 @@ struct ClaudeSettingsInstaller {
         return command == shellQuote(bridgeURL.path)
     }
 
-    func install(now: Date = Date(), capturesSessionDetails: Bool = false) throws {
+    func install(now: Date = Date()) throws {
         try fileManager.createDirectory(at: settingsURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try fileManager.createDirectory(at: paths.bridgeDirectory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
 
@@ -71,7 +68,6 @@ struct ClaudeSettingsInstaller {
         let original = root["statusLine"]
         if let current = original as? [String: Any],
            current["command"] as? String == shellQuote(bridgeURL.path) {
-            if capturesSessionDetails { try enableSessionDetails() }
             return
         }
 
@@ -93,11 +89,10 @@ struct ClaudeSettingsInstaller {
         let manifest = ClaudeInstallManifest(
             installedCommand: installedCommand,
             originalStatusLineJSON: originalJSON,
-            installedAt: now,
-            capturesSessionDetails: capturesSessionDetails
+            installedAt: now
         )
 
-        try writePrivate(Data(bridgeScript(originalCommand: originalCommand, capturesSessionDetails: capturesSessionDetails).utf8), to: bridgeURL, permissions: 0o700)
+        try writePrivate(Data(bridgeScript(originalCommand: originalCommand).utf8), to: bridgeURL, permissions: 0o700)
         let manifestData = try JSONEncoder().encode(manifest)
         try writePrivate(manifestData, to: paths.claudeManifest, permissions: 0o600)
 
@@ -110,34 +105,6 @@ struct ClaudeSettingsInstaller {
             throw error
         }
         try pruneBackups(keeping: 5)
-    }
-
-    func isSessionDetailsEnabled() -> Bool {
-        guard isInstalled(),
-              let data = try? Data(contentsOf: paths.claudeManifest),
-              let manifest = try? JSONDecoder().decode(ClaudeInstallManifest.self, from: data)
-        else { return false }
-        return manifest.capturesSessionDetails
-    }
-
-    func enableSessionDetails() throws {
-        if !isInstalled() {
-            try install(capturesSessionDetails: true)
-            return
-        }
-        var manifest = try readManifestAndValidateCurrentCommand()
-        guard !manifest.capturesSessionDetails else { return }
-        manifest.capturesSessionDetails = true
-        try rewriteBridgeAndManifest(manifest)
-    }
-
-    func disableSessionDetails() throws {
-        var manifest = try readManifestAndValidateCurrentCommand()
-        if manifest.capturesSessionDetails {
-            manifest.capturesSessionDetails = false
-            try rewriteBridgeAndManifest(manifest)
-        }
-        try? fileManager.removeItem(at: paths.claudeSessionCapture)
     }
 
     @discardableResult
@@ -165,35 +132,10 @@ struct ClaudeSettingsInstaller {
         try? fileManager.removeItem(at: bridgeURL)
         try? fileManager.removeItem(at: paths.claudeManifest)
         try? fileManager.removeItem(at: paths.claudeCapture)
-        try? fileManager.removeItem(at: paths.claudeSessionCapture)
+        // Best-effort cleanup of a capture file from the now-removed session-details feature,
+        // in case this Mac had it enabled before the feature was retired.
+        try? fileManager.removeItem(at: paths.bridgeDirectory.appending(path: "claude-session-details.json"))
         return true
-    }
-
-    private func readManifestAndValidateCurrentCommand() throws -> ClaudeInstallManifest {
-        guard fileManager.fileExists(atPath: paths.claudeManifest.path) else {
-            throw ClaudeSettingsError.missingManifest
-        }
-        let manifest = try JSONDecoder().decode(ClaudeInstallManifest.self, from: Data(contentsOf: paths.claudeManifest))
-        let root = try readSettings()
-        let currentCommand = (root["statusLine"] as? [String: Any])?["command"] as? String
-        guard currentCommand == manifest.installedCommand else { throw ClaudeSettingsError.changedSinceInstall }
-        return manifest
-    }
-
-    private func rewriteBridgeAndManifest(_ manifest: ClaudeInstallManifest) throws {
-        let originalCommand: String?
-        if let data = manifest.originalStatusLineJSON,
-           let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            originalCommand = object["command"] as? String
-        } else {
-            originalCommand = nil
-        }
-        try writePrivate(
-            Data(bridgeScript(originalCommand: originalCommand, capturesSessionDetails: manifest.capturesSessionDetails).utf8),
-            to: bridgeURL,
-            permissions: 0o700
-        )
-        try writePrivate(try JSONEncoder().encode(manifest), to: paths.claudeManifest, permissions: 0o600)
     }
 
     private func readSettings() throws -> [String: Any] {
@@ -255,17 +197,13 @@ struct ClaudeSettingsInstaller {
         }
     }
 
-    private func bridgeScript(originalCommand: String?, capturesSessionDetails: Bool) -> String {
+    private func bridgeScript(originalCommand: String?) -> String {
         let original = Data((originalCommand ?? "").utf8).base64EncodedString()
         let capturePath = shellQuote(paths.claudeCapture.path)
-        let sessionCapturePath = shellQuote(paths.claudeSessionCapture.path)
-        let sessionCapture = capturesSessionDetails ? "1" : "0"
         return """
         #!/bin/zsh
         umask 077
         capture_path=\(capturePath)
-        session_capture_path=\(sessionCapturePath)
-        capture_session_details=\(sessionCapture)
         original_command="$(/usr/bin/printf '%s' '\(original)' | /usr/bin/base64 -D 2>/dev/null)"
         payload="$(/bin/cat)"
 
@@ -274,37 +212,6 @@ struct ClaudeSettingsInstaller {
         fi
 
         captured_at="$(/bin/date +%s)"
-
-        if [[ "$capture_session_details" == "1" ]]; then
-          model_id="$(/usr/bin/printf '%s' "$payload" | /usr/bin/plutil -extract model.id raw -o - -- - 2>/dev/null)"
-          if [[ -n "$model_id" ]]; then
-            model_name="$(/usr/bin/printf '%s' "$payload" | /usr/bin/plutil -extract model.display_name raw -o - -- - 2>/dev/null)"
-            effort_level="$(/usr/bin/printf '%s' "$payload" | /usr/bin/plutil -extract effort.level raw -o - -- - 2>/dev/null)"
-            thinking_enabled="$(/usr/bin/printf '%s' "$payload" | /usr/bin/plutil -extract thinking.enabled raw -o - -- - 2>/dev/null)"
-            agent_name="$(/usr/bin/printf '%s' "$payload" | /usr/bin/plutil -extract agent.name raw -o - -- - 2>/dev/null)"
-            session_temporary="${session_capture_path}.tmp.$$"
-            /usr/bin/plutil -create xml1 "$session_temporary"
-            /usr/bin/plutil -insert captured_at -integer "$captured_at" "$session_temporary"
-            /usr/bin/plutil -insert model -dictionary "$session_temporary"
-            /usr/bin/plutil -insert model.id -string "$model_id" "$session_temporary"
-            [[ -n "$model_name" ]] && /usr/bin/plutil -insert model.display_name -string "$model_name" "$session_temporary"
-            if [[ -n "$effort_level" ]]; then
-              /usr/bin/plutil -insert effort -dictionary "$session_temporary"
-              /usr/bin/plutil -insert effort.level -string "$effort_level" "$session_temporary"
-            fi
-            if [[ "$thinking_enabled" == "true" || "$thinking_enabled" == "false" ]]; then
-              /usr/bin/plutil -insert thinking -dictionary "$session_temporary"
-              /usr/bin/plutil -insert thinking.enabled -bool "$thinking_enabled" "$session_temporary"
-            fi
-            if [[ -n "$agent_name" ]]; then
-              /usr/bin/plutil -insert agent -dictionary "$session_temporary"
-              /usr/bin/plutil -insert agent.name -string "$agent_name" "$session_temporary"
-            fi
-            /usr/bin/plutil -convert json "$session_temporary"
-            /bin/chmod 600 "$session_temporary"
-            /bin/mv -f "$session_temporary" "$session_capture_path"
-          fi
-        fi
 
         rate_limits="$(/usr/bin/printf '%s' "$payload" | /usr/bin/plutil -extract rate_limits json -o - -- - 2>/dev/null)"
         if [[ -n "$rate_limits" ]]; then

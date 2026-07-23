@@ -15,6 +15,10 @@ struct CodexRPCError: Decodable, Sendable {
 
 enum CodexRateLimitParser {
     static func parse(_ response: JSONValue, now: Date = Date()) throws -> UsageSnapshot {
+        try parseRefresh(response, now: now).snapshot
+    }
+
+    static func parseRefresh(_ response: JSONValue, now: Date = Date()) throws -> CodexRateLimitParseResult {
         guard let root = response.objectValue else {
             throw ProviderBoundaryError.invalidPayload
         }
@@ -33,12 +37,16 @@ enum CodexRateLimitParser {
         guard !windows.isEmpty else { throw ProviderBoundaryError.invalidPayload }
 
         let billing = parseBilling(snapshotObject, now: now)
-        return UsageSnapshot(
+        let snapshot = UsageSnapshot(
             provider: .codex,
             capturedAt: now,
             source: .codexAppServer,
             windows: windows,
             billing: billing
+        )
+        return CodexRateLimitParseResult(
+            snapshot: snapshot,
+            resetCredits: try parseResetCredits(root["rateLimitResetCredits"], now: now)
         )
     }
 
@@ -112,4 +120,47 @@ enum CodexRateLimitParser {
         else { return nil }
         return value
     }
+
+    private static func parseResetCredits(
+        _ value: JSONValue?,
+        now: Date
+    ) throws -> CodexResetCreditsSnapshot? {
+        guard let value, value != .null else { return nil }
+        guard let object = value.objectValue,
+              let availableCount = object["availableCount"]?.int64Value,
+              availableCount >= 0
+        else { throw ProviderBoundaryError.invalidPayload }
+
+        let expiries: [Date]
+        switch object["credits"] {
+        case nil, .some(.null):
+            expiries = []
+        case let .some(.array(values)):
+            expiries = values.compactMap { value in
+                guard let credit = value.objectValue,
+                      credit["status"]?.stringValue == "available",
+                      credit["resetType"]?.stringValue == "codexRateLimits",
+                      let expiry = UsageAlgorithms.validResetDate(
+                          epochSeconds: credit["expiresAt"]?.doubleValue,
+                          now: now
+                      ),
+                      expiry > now
+                else { return nil }
+                return expiry
+            }
+        default:
+            throw ProviderBoundaryError.invalidPayload
+        }
+
+        return CodexResetCreditsSnapshot(
+            capturedAt: now,
+            availableCount: availableCount,
+            nextProvidedExpiry: expiries.min()
+        )
+    }
+}
+
+struct CodexRateLimitParseResult: Equatable, Sendable {
+    let snapshot: UsageSnapshot
+    let resetCredits: CodexResetCreditsSnapshot?
 }

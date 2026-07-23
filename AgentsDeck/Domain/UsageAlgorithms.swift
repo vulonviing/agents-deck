@@ -7,6 +7,8 @@ enum UsageValidationError: Error, Equatable {
 }
 
 enum UsageAlgorithms {
+    static let snapshotFreshnessInterval: TimeInterval = 15 * 60
+
     static func normalizedPercentage(_ value: Double) throws -> Double {
         guard value.isFinite, value >= 0 else {
             throw UsageValidationError.invalidPercentage
@@ -31,8 +33,7 @@ enum UsageAlgorithms {
     }
 
     static func isFresh(_ snapshot: UsageSnapshot, now: Date = Date()) -> Bool {
-        let maximumAge: TimeInterval = snapshot.provider == .claude ? 10 * 60 : 150
-        return now.timeIntervalSince(snapshot.capturedAt) <= maximumAge
+        now.timeIntervalSince(snapshot.capturedAt) <= snapshotFreshnessInterval
     }
 
     static func criticalProvider(

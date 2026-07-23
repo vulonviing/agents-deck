@@ -7,6 +7,22 @@ enum CodexAppServerEvent: Sendable {
     case protocolFailure
 }
 
+enum CodexClientMethod: String, CaseIterable, Sendable {
+    case initialize
+    case initialized
+    case accountRead = "account/read"
+    case accountRateLimitsRead = "account/rateLimits/read"
+    case accountUsageRead = "account/usage/read"
+    case accountLoginStart = "account/login/start"
+
+    var isBackgroundSafe: Bool {
+        switch self {
+        case .accountRead, .accountRateLimitsRead, .accountUsageRead: true
+        case .initialize, .initialized, .accountLoginStart: false
+        }
+    }
+}
+
 actor CodexAppServerClient {
     nonisolated let events: AsyncStream<CodexAppServerEvent>
     private let eventContinuation: AsyncStream<CodexAppServerEvent>.Continuation
@@ -73,7 +89,7 @@ actor CodexAppServerClient {
         self.errorPipe = errorPipe
 
         _ = try await request(
-            method: "initialize",
+            method: .initialize,
             params: .object([
                 "clientInfo": .object([
                     "name": .string("agents_deck"),
@@ -82,20 +98,24 @@ actor CodexAppServerClient {
                 ])
             ])
         )
-        try notify(method: "initialized", params: .object([:]))
+        try notify(method: .initialized, params: .object([:]))
     }
 
     func account() async throws -> JSONValue {
-        try await request(method: "account/read", params: .object([:]))
+        try await request(method: .accountRead, params: .object([:]))
     }
 
     func rateLimits() async throws -> JSONValue {
-        try await request(method: "account/rateLimits/read", params: .object([:]))
+        try await request(method: .accountRateLimitsRead)
+    }
+
+    func accountUsage() async throws -> JSONValue {
+        try await request(method: .accountUsageRead)
     }
 
     func startChatGPTLogin() async throws -> URL {
         let result = try await request(
-            method: "account/login/start",
+            method: .accountLoginStart,
             params: .object(["type": .string("chatgpt")])
         )
         guard let value = result.objectValue?["authUrl"]?.stringValue,
@@ -122,7 +142,11 @@ actor CodexAppServerClient {
         errorPipe = nil
     }
 
-    private func request(method: String, params: JSONValue, timeout: Duration = .seconds(10)) async throws -> JSONValue {
+    private func request(
+        method: CodexClientMethod,
+        params: JSONValue? = nil,
+        timeout: Duration = .seconds(10)
+    ) async throws -> JSONValue {
         guard input != nil else { throw ProviderBoundaryError.processFailed(-1) }
         let id = nextID
         nextID += 1
@@ -135,11 +159,12 @@ actor CodexAppServerClient {
                 }
                 pending[id] = PendingRequest(continuation: continuation, timeoutTask: timeoutTask)
                 do {
-                    try write(.object([
+                    var message: [String: JSONValue] = [
                         "id": .integer(Int64(id)),
-                        "method": .string(method),
-                        "params": params
-                    ]))
+                        "method": .string(method.rawValue),
+                    ]
+                    if let params { message["params"] = params }
+                    try write(.object(message))
                 } catch {
                     pending.removeValue(forKey: id)?.timeoutTask.cancel()
                     continuation.resume(throwing: error)
@@ -151,8 +176,8 @@ actor CodexAppServerClient {
         }
     }
 
-    private func notify(method: String, params: JSONValue) throws {
-        try write(.object(["method": .string(method), "params": params]))
+    private func notify(method: CodexClientMethod, params: JSONValue) throws {
+        try write(.object(["method": .string(method.rawValue), "params": params]))
     }
 
     private func write(_ value: JSONValue) throws {

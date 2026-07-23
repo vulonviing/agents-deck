@@ -25,26 +25,30 @@ struct ProviderCardView: View {
     private var header: some View {
         HStack(spacing: 10) {
             Button(action: onShowDetails) {
-                HStack(spacing: 10) {
-                    ProviderLogo(provider: state.provider)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(state.provider.displayName)
-                            .font(DeckDesign.font(16, weight: .medium))
-                        Text("CLI session")
-                            .font(DeckDesign.font(10))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .contentShape(Rectangle())
+                headerIdentity
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .deckInteractive(
-                help: "Open \(state.provider.displayName) session details",
+                help: "Open \(state.provider.displayName) connection details",
                 style: .row
             )
-            .accessibilityLabel("Open \(state.provider.displayName) session details")
+            .accessibilityLabel("Open \(state.provider.displayName) connection details")
             Spacer(minLength: 8)
             statusPill
+        }
+    }
+
+    private var headerIdentity: some View {
+        HStack(spacing: 10) {
+            ProviderLogo(provider: state.provider)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(state.provider.displayName)
+                    .font(DeckDesign.font(16, weight: .medium))
+                Text("CLI session")
+                    .font(DeckDesign.font(10))
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 

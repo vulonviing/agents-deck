@@ -62,4 +62,13 @@ enum JSONValue: Codable, Equatable, Sendable {
         guard let value = doubleValue, value.isFinite else { return nil }
         return Int(value)
     }
+
+    var int64Value: Int64? {
+        switch self {
+        case let .integer(value): value
+        case let .number(value) where value.isFinite && value.rounded() == value:
+            Int64(exactly: value)
+        default: nil
+        }
+    }
 }

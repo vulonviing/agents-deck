@@ -3,9 +3,21 @@ import Foundation
 enum ProviderRefreshReason: Equatable, Sendable {
     case startup
     case scheduled
+    case scheduledActivity
     case popoverOpened
+    case detailOpened
     case providerNotification
     case manual
+}
+
+struct ProviderRefreshResult: Equatable, Sendable {
+    let snapshot: UsageSnapshot
+    let supplement: ProviderSupplement?
+
+    init(snapshot: UsageSnapshot, supplement: ProviderSupplement? = nil) {
+        self.snapshot = snapshot
+        self.supplement = supplement
+    }
 }
 
 enum UsageProviderEvent: Sendable {
@@ -14,7 +26,6 @@ enum UsageProviderEvent: Sendable {
     case version(ProviderID, String)
     case restartCount(ProviderID, Int)
     case refreshRequested(ProviderID)
-    case sessionConfiguration(SessionConfigurationSnapshot)
 }
 
 protocol UsageProvider: Sendable {
@@ -22,7 +33,7 @@ protocol UsageProvider: Sendable {
     var events: AsyncStream<UsageProviderEvent> { get }
 
     func start() async
-    func refresh(reason: ProviderRefreshReason) async throws -> UsageSnapshot
+    func refresh(reason: ProviderRefreshReason) async throws -> ProviderRefreshResult
     func connect() async
     func stop() async
 }
@@ -31,9 +42,6 @@ protocol ClaudeUsageProviding: UsageProvider {
     func installBridge() async throws
     func uninstallBridge() async throws
     func isBridgeInstalled() async -> Bool
-    func enableSessionDetails() async throws
-    func disableSessionDetails() async throws
-    func isSessionDetailsEnabled() async -> Bool
 }
 
 protocol CodexUsageProviding: UsageProvider {

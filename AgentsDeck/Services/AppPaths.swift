@@ -5,7 +5,6 @@ struct AppPaths: Sendable {
 
     var bridgeDirectory: URL { applicationSupport.appending(path: "Bridge", directoryHint: .isDirectory) }
     var claudeCapture: URL { bridgeDirectory.appending(path: "claude-usage.json") }
-    var claudeSessionCapture: URL { bridgeDirectory.appending(path: "claude-session-details.json") }
     var claudeManifest: URL { bridgeDirectory.appending(path: "claude-install.json") }
     var claudeProbeDirectory: URL { applicationSupport.appending(path: "Claude Probe", directoryHint: .isDirectory) }
     var logsDirectory: URL { applicationSupport.appending(path: "Logs", directoryHint: .isDirectory) }

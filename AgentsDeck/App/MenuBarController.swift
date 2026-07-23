@@ -78,6 +78,8 @@ final class MenuBarController: NSObject, NSWindowDelegate {
         button.target = self
         button.action = #selector(statusItemClicked(_:))
         button.sendAction(on: [.leftMouseDown, .rightMouseDown])
+        button.cell.map { ($0 as? NSButtonCell)?.wraps = false }
+        button.lineBreakMode = .byClipping
     }
 
     private func showStatusItem() {
@@ -228,34 +230,36 @@ final class MenuBarController: NSObject, NSWindowDelegate {
               let button = statusItem.button
         else { return }
 
-        statusItem.length = MenuBarStatusLayout.contentWidth(segmentCount: statusDisplays.count)
         button.image = nil
         renderExpandedStatusTitle(on: button)
+        statusItem.length = button.attributedTitle.size().width
     }
 
     private func renderExpandedStatusTitle(on button: NSStatusBarButton) {
         let result = NSMutableAttributedString()
         for (index, display) in statusDisplays.enumerated() {
             if index > 0 {
-                result.append(NSAttributedString(string: "   "))
+                result.append(NSAttributedString(string: MenuBarStatusLayout.separator))
             }
 
             let hovered = hoveredStatusProvider == display.provider
             let attachment = NSTextAttachment()
             attachment.image = statusImage(for: display.provider)
-            attachment.bounds = NSRect(x: 0, y: hovered ? -1 : -2, width: 15, height: 15)
+            attachment.bounds = NSRect(x: 0, y: hovered ? -1 : -2, width: MenuBarStatusLayout.iconWidth, height: MenuBarStatusLayout.iconWidth)
             result.append(NSAttributedString(attachment: attachment))
 
-            let percentage = display.percent.map { " \($0)%" } ?? " --"
             result.append(NSAttributedString(
-                string: percentage,
+                string: MenuBarStatusLayout.percentageText(for: display),
                 attributes: [
-                    .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium),
+                    .font: MenuBarStatusLayout.percentageFont,
                     .foregroundColor: NSColor.labelColor,
                     .baselineOffset: hovered ? 1 : 0
                 ]
             ))
         }
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.lineBreakMode = .byClipping
+        result.addAttribute(.paragraphStyle, value: paragraphStyle, range: NSRange(location: 0, length: result.length))
         button.attributedTitle = result
     }
 
@@ -507,8 +511,7 @@ enum MenuBarPresentation {
     ) -> MenuBarDisplay {
         if let selectedProviderID {
             guard let selected = state.providers[selectedProviderID],
-                  let snapshot = selected.snapshot,
-                  UsageAlgorithms.isFresh(snapshot, now: now)
+                  let snapshot = selected.snapshot
             else {
                 return MenuBarDisplay(provider: selectedProviderID, percent: nil)
             }
@@ -542,7 +545,6 @@ enum MenuBarPresentation {
     ) -> MenuBarProviderDisplay {
         guard let providerState = state.providers[provider],
               let snapshot = providerState.snapshot,
-              UsageAlgorithms.isFresh(snapshot, now: now),
               let window = selectedWindowKind.flatMap({ snapshot[$0] }) ?? snapshot.preferredGaugeWindow
         else {
             return MenuBarProviderDisplay(provider: provider, percent: nil)
@@ -552,20 +554,46 @@ enum MenuBarPresentation {
 }
 
 private enum MenuBarStatusLayout {
-    static let segmentWidth: CGFloat = 56
-    static let spacing: CGFloat = 4
+    static let iconWidth: CGFloat = 15
+    static let separator = "  "
+    static var percentageFont: NSFont { NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium) }
     static let height: CGFloat = 22
 
-    static func contentWidth(segmentCount: Int) -> CGFloat {
-        let count = max(1, segmentCount)
-        return CGFloat(count) * segmentWidth + CGFloat(max(0, count - 1)) * spacing
+    static func percentageText(for display: MenuBarProviderDisplay) -> String {
+        display.percent.map { " \($0)%" } ?? " --"
+    }
+
+    static func spacing() -> CGFloat {
+        (separator as NSString).size(withAttributes: [.font: percentageFont]).width
+    }
+
+    static func segmentWidth(for display: MenuBarProviderDisplay) -> CGFloat {
+        let textWidth = (percentageText(for: display) as NSString)
+            .size(withAttributes: [.font: percentageFont])
+            .width
+        return iconWidth + textWidth
+    }
+
+    /// Left edge of each segment, in the order they are rendered.
+    static func segmentOrigins(for segments: [MenuBarProviderDisplay]) -> [CGFloat] {
+        let gap = spacing()
+        var origins: [CGFloat] = []
+        var x: CGFloat = 0
+        for (index, segment) in segments.enumerated() {
+            if index > 0 { x += gap }
+            origins.append(x)
+            x += segmentWidth(for: segment)
+        }
+        return origins
     }
 
     static func provider(at point: NSPoint, in segments: [MenuBarProviderDisplay]) -> ProviderID? {
         guard point.y >= 0, point.y <= height else { return nil }
+        let origins = segmentOrigins(for: segments)
         for (index, segment) in segments.enumerated() {
-            let minX = CGFloat(index) * (segmentWidth + spacing)
-            if point.x >= minX, point.x <= minX + segmentWidth { return segment.provider }
+            let minX = origins[index]
+            let maxX = minX + segmentWidth(for: segment)
+            if point.x >= minX, point.x <= maxX { return segment.provider }
         }
         return nil
     }
