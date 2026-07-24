@@ -10,12 +10,12 @@ It shows each provider's verified usage windows with their real durations, reset
 
 ## Download and install
 
-1. Download `Agents-Deck-1.2.0.dmg` and its `.sha256` file from the latest [GitHub Release](https://github.com/vulonviing/agents-deck/releases/latest).
+1. Download `Agents-Deck-1.2.1.dmg` and its `.sha256` file from the latest [GitHub Release](https://github.com/vulonviing/agents-deck/releases/latest).
 2. Optionally verify the download:
 
    ```sh
-   shasum -a 256 -c Agents-Deck-1.2.0.sha256
-   gh attestation verify Agents-Deck-1.2.0.dmg --repo vulonviing/agents-deck
+   shasum -a 256 -c Agents-Deck-1.2.1.sha256
+   gh attestation verify Agents-Deck-1.2.1.dmg --repo vulonviing/agents-deck
    ```
 
 3. Open the DMG and drag **Agents Deck** to **Applications**.
@@ -84,7 +84,9 @@ Claude also exposes subscription limits through its documented status-line JSON.
 
 If the bridge has not produced data yet, the `/usage` probe can still provide verified windows. Session cost remains unavailable until Claude reports it through the status line.
 
-Agents Deck does not identify which Claude model, effort, or thinking configuration produced a given session. There is no compliant way to obtain that historically: Anthropic's server-side usage-history API targets organization API-key billing rather than individual subscriptions, and reading Claude Code's local transcripts would mean reading conversation contents, which Agents Deck never does.
+The Claude detail page also reads Claude Code's own local `stats-cache.json` in read-only mode. It shows an explicitly **Local** and approximate Overview/Models view with all-time, seven-day, and thirty-day aggregates. Only daily counts, aggregate input/output model tokens, streak inputs, peak hour, and longest-session duration are allowlisted. Raw JSON, cost and cache-token fields, session identifiers, and unknown fields are discarded.
+
+Agents Deck does not identify which model, effort, or thinking configuration produced a particular Claude session. It never reads conversation transcripts, and it never requests an organization Admin API key.
 
 ### Codex
 
@@ -101,7 +103,7 @@ Codex window durations are supplied by app-server and may differ by account. Age
 - Left-click the menu bar item to open a resizable usage panel. Drag a panel edge or corner to resize it; the last size is restored on the next open.
 - Click a usage ring or its metric row to select that window. The center defaults to the lowest verified percentage whenever the panel opens.
 - Use the provider menu beside Refresh to show Claude, Codex, or both in the menu bar. Each segment follows that provider card's selected usage window.
-- Click a provider card's logo or name to open its detail page. Both providers show connection diagnostics. Codex additionally shows verified token activity and read-only reset-credit availability. Neither provider's model or reasoning effort is shown there, and Agents Deck never inspects threads or conversation contents to infer them.
+- Click a provider card's logo or name to open its detail page. Both providers show connection diagnostics. Codex additionally shows verified token activity and read-only reset-credit availability. Claude shows separately labelled local aggregate activity and aggregate model totals; it never attributes a model or reasoning effort to a session. Agents Deck never inspects threads or conversation contents.
 - Use the timer menu to choose a 1–3, 3–5, or 4–6 minute automatic refresh range. Display mode, cadence, selected windows, and panel size are restored after relaunch.
 - Hover the center percentage to see the selected window's name.
 - Hover any interactive control to see subtle motion and an action-oriented tooltip. Reduce Motion disables the transform without removing the tooltip or focus indication.
@@ -129,12 +131,12 @@ Application-owned data stays under:
 
 Release DMGs are built on an ephemeral GitHub-hosted macOS 26 runner using only Apple command-line tools. Each release includes a SHA-256 checksum and a GitHub artifact attestation. The workflow rejects local user paths, credential markers, internal development material, unexpected bundle contents, non-system dynamic libraries, and unexpected code-signing entitlements before publishing.
 
-Version 1.2.0, like every release since, is ad-hoc signed because the project has no paid Apple Developer membership. Version 1.0.0 was withdrawn and replaced by 1.0.1 after release-build hardening. A checksum and attestation help verify the published artifact, but they are not substitutes for Developer ID signing and Apple notarization. The release page and this README intentionally disclose that limitation.
+Version 1.2.1, like every release since, is ad-hoc signed because the project has no paid Apple Developer membership. Version 1.0.0 was withdrawn and replaced by 1.0.1 after release-build hardening. A checksum and attestation help verify the published artifact, but they are not substitutes for Developer ID signing and Apple notarization. The release page and this README intentionally disclose that limitation.
 
 ## Runtime design
 
 - One SwiftUI menu bar application; no Dock icon.
-- One cancellable coordinator scheduler with independently jittered Claude and Codex rate-limit deadlines, a 15-minute Codex token-activity fallback, and maintenance.
+- One cancellable coordinator scheduler with independently jittered Claude and Codex rate-limit deadlines, a 15-minute Codex token-activity fallback, Claude local-stats freshness evaluation, and maintenance.
 - One event-driven Claude bridge-directory observer.
 - One Codex app-server process, terminated when Agents Deck quits.
 - No helper daemon, launch agent, telemetry service, or permanently running tests.

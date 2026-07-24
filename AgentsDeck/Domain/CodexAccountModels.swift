@@ -77,5 +77,6 @@ struct CodexSupplementalRefresh: Equatable, Sendable {
 }
 
 enum ProviderSupplement: Equatable, Sendable {
+    case claude(ClaudeStatsRefresh)
     case codex(CodexSupplementalRefresh)
 }

@@ -231,6 +231,8 @@ struct ProviderViewState: Equatable, Sendable {
     var executableVersion: String?
     var restartCount = 0
     var bridgeInstalled = false
+    var claudeStats: ClaudeStatsSnapshot?
+    var claudeStatsState: ClaudeStatsState = .waiting
     var codexAccount: CodexAccountSnapshot?
     var codexActivityState: CodexActivityState = .waiting
 

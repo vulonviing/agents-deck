@@ -10,6 +10,7 @@ actor ClaudeProvider: ClaudeUsageProviding {
     private let locator: ExecutableLocator
     private let runner: any ProcessRunning
     private let usageProbe: any ClaudeUsageCommandProbing
+    private let statsReader: any ClaudeStatsReading
     private let installer: ClaudeSettingsInstaller
     private let paths: AppPaths
     private var executable: URL?
@@ -22,6 +23,7 @@ actor ClaudeProvider: ClaudeUsageProviding {
         locator: ExecutableLocator = ExecutableLocator(),
         runner: any ProcessRunning = SystemProcessRunner(),
         usageProbe: any ClaudeUsageCommandProbing = ClaudeUsageCommandProbe(),
+        statsReader: any ClaudeStatsReading = ClaudeStatsCacheReader(),
         installer: ClaudeSettingsInstaller = ClaudeSettingsInstaller(),
         paths: AppPaths = .live()
     ) {
@@ -31,6 +33,7 @@ actor ClaudeProvider: ClaudeUsageProviding {
         self.locator = locator
         self.runner = runner
         self.usageProbe = usageProbe
+        self.statsReader = statsReader
         self.installer = installer
         self.paths = paths
     }
@@ -68,7 +71,17 @@ actor ClaudeProvider: ClaudeUsageProviding {
         try Task.checkCancellation()
         let snapshot = verifiedResetCache.merge(probedSnapshot)
         latestSnapshotAt = max(latestSnapshotAt ?? .distantPast, snapshot.capturedAt)
-        return ProviderRefreshResult(snapshot: snapshot)
+        let statsRefresh: ClaudeStatsRefresh
+        do {
+            statsRefresh = .available(try statsReader.read(capturedAt: snapshot.capturedAt))
+        } catch ClaudeStatsCacheError.unavailable {
+            statsRefresh = .unavailable
+        } catch let error as ClaudeStatsCacheError {
+            statsRefresh = .failed(error.providerCode)
+        } catch {
+            statsRefresh = .failed(.unknown)
+        }
+        return ProviderRefreshResult(snapshot: snapshot, supplement: .claude(statsRefresh))
     }
 
     func installBridge() async throws {

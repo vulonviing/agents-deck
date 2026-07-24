@@ -57,6 +57,7 @@ enum ProviderBoundaryError: Error, Equatable, Sendable {
     case messageTooLarge
     case unsupportedProtocol
     case retryPaused
+    case fileAccess
 
     var code: ProviderErrorCode {
         switch self {
@@ -68,6 +69,7 @@ enum ProviderBoundaryError: Error, Equatable, Sendable {
         case .messageTooLarge: .invalidPayload
         case .unsupportedProtocol: .unsupportedProtocol
         case .retryPaused: .retryPaused
+        case .fileAccess: .fileAccess
         }
     }
 }
