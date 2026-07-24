@@ -167,6 +167,31 @@ final class LatestCodexAccountRecord {
 }
 
 @Model
+final class LatestClaudeStatsRecord {
+    @Attribute(.unique) var key: String
+    var capturedAt: Date
+    var payload: Data
+
+    init(snapshot: ClaudeStatsSnapshot) throws {
+        key = ProviderID.claude.rawValue
+        capturedAt = snapshot.capturedAt
+        payload = try JSONEncoder().encode(snapshot)
+    }
+
+    func update(with snapshot: ClaudeStatsSnapshot) throws {
+        capturedAt = snapshot.capturedAt
+        payload = try JSONEncoder().encode(snapshot)
+    }
+
+    func snapshot() -> ClaudeStatsSnapshot? {
+        guard let snapshot = try? JSONDecoder().decode(ClaudeStatsSnapshot.self, from: payload),
+              snapshot.capturedAt == capturedAt
+        else { return nil }
+        return snapshot
+    }
+}
+
+@Model
 final class NotificationReceipt {
     @Attribute(.unique) var key: String
     var createdAt: Date
@@ -189,6 +214,8 @@ protocol HistoryStoring: Sendable {
     func clearReceipts() async throws
     func recordCodexAccount(_ snapshot: CodexAccountSnapshot) async throws
     func latestCodexAccount() async throws -> CodexAccountSnapshot?
+    func recordClaudeStats(_ snapshot: ClaudeStatsSnapshot) async throws
+    func latestClaudeStats() async throws -> ClaudeStatsSnapshot?
 }
 
 @ModelActor
@@ -201,6 +228,7 @@ actor SwiftDataHistoryStore: HistoryStoring {
             UsageRecord.self,
             LatestUsageRecord.self,
             LatestCodexAccountRecord.self,
+            LatestClaudeStatsRecord.self,
             NotificationReceipt.self,
         ])
         let configuration = ModelConfiguration(
@@ -302,6 +330,7 @@ actor SwiftDataHistoryStore: HistoryStoring {
         try modelContext.delete(model: UsageRecord.self)
         try modelContext.delete(model: LatestUsageRecord.self)
         try modelContext.delete(model: LatestCodexAccountRecord.self)
+        try modelContext.delete(model: LatestClaudeStatsRecord.self)
         try modelContext.save()
     }
 
@@ -326,6 +355,22 @@ actor SwiftDataHistoryStore: HistoryStoring {
             .snapshot()
     }
 
+    func recordClaudeStats(_ snapshot: ClaudeStatsSnapshot) throws {
+        let records = try modelContext.fetch(FetchDescriptor<LatestClaudeStatsRecord>())
+        if let existing = records.first(where: { $0.key == ProviderID.claude.rawValue }) {
+            try existing.update(with: snapshot)
+        } else {
+            modelContext.insert(try LatestClaudeStatsRecord(snapshot: snapshot))
+        }
+        try modelContext.save()
+    }
+
+    func latestClaudeStats() throws -> ClaudeStatsSnapshot? {
+        try modelContext.fetch(FetchDescriptor<LatestClaudeStatsRecord>())
+            .first(where: { $0.key == ProviderID.claude.rawValue })?
+            .snapshot()
+    }
+
     private nonisolated static func minuteKey(for snapshot: UsageSnapshot) -> String {
         let minute = Int(snapshot.capturedAt.timeIntervalSince1970 / 60)
         return "\(snapshot.provider.rawValue):\(minute)"
@@ -338,6 +383,7 @@ actor InMemoryHistoryStore: HistoryStoring {
     private var latestSnapshots: [ProviderID: UsageSnapshot] = [:]
     private var receipts: [String: Date] = [:]
     private var codexAccount: CodexAccountSnapshot?
+    private var claudeStats: ClaudeStatsSnapshot?
 
     func record(_ snapshot: UsageSnapshot) {
         latestSnapshots[snapshot.provider] = snapshot
@@ -381,10 +427,13 @@ actor InMemoryHistoryStore: HistoryStoring {
         snapshots.removeAll()
         latestSnapshots.removeAll()
         codexAccount = nil
+        claudeStats = nil
     }
     func clearReceipts() { receipts.removeAll() }
     func recordCodexAccount(_ snapshot: CodexAccountSnapshot) { codexAccount = snapshot }
     func latestCodexAccount() -> CodexAccountSnapshot? { codexAccount }
+    func recordClaudeStats(_ snapshot: ClaudeStatsSnapshot) { claudeStats = snapshot }
+    func latestClaudeStats() -> ClaudeStatsSnapshot? { claudeStats }
 }
 
 enum HistoryStoreFactory {
@@ -445,6 +494,7 @@ enum HistoryStoreMigration {
             UsageRecord.self,
             LatestUsageRecord.self,
             LatestCodexAccountRecord.self,
+            LatestClaudeStatsRecord.self,
             NotificationReceipt.self,
         ])
         let configuration = ModelConfiguration(

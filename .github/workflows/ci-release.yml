@@ -152,7 +152,11 @@ jobs:
             '' \
             '**Security hardening:** Version 1.0.0 was withdrawn. Version 1.0.1 removes debug entitlements and adds signed source, protected release tags, release-bundle audits, SHA-256 checksums, and GitHub artifact attestations.' \
             '' \
-            '**New in 1.2.0:** Adds Codex Daily, Weekly, and Cumulative token activity from app-server, with exact date/period and token values on hover.' \
+            '**New in 1.2.1:** Adds an explicitly Local, approximate Claude activity view with Overview and Models tabs plus all-time, 7-day, and 30-day filters.' \
+            '' \
+            '**Claude privacy boundary:** Reads only Claude Code aggregate stats through a closed allowlist. Raw JSON, cost/cache fields, session identifiers, unknown fields, transcripts, and credentials are never retained.' \
+            '' \
+            '**Reader safety:** Rejects symlinks, non-regular files, relative configuration roots, oversized input, future-dated records, and malformed values; file reads are bounded and nonblocking.' \
             '' \
             '**Reset-credit safety:** Shows available Codex reset credits and provider-supplied expiry as read-only information. Agents Deck cannot represent or call the reset-credit consume method.' \
             '' \

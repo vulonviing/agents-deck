@@ -25,6 +25,7 @@ actor UsageCoordinator {
 
     private static let codexActivityInterval: TimeInterval = 15 * 60
     private static let codexActivityFreshness: TimeInterval = 30 * 60
+    private static let claudeStatsFreshness: TimeInterval = 15 * 60
 
     init(
         claude: any ClaudeUsageProviding = ClaudeProvider(),
@@ -120,8 +121,7 @@ actor UsageCoordinator {
     }
 
     func providerDetailOpened(_ provider: ProviderID) async {
-        guard provider == .codex else { return }
-        await requestRefresh(.codex, reason: .detailOpened, policy: .coalesce)
+        await requestRefresh(provider, reason: .detailOpened, policy: .coalesce)
         restartPollTask()
     }
 
@@ -182,6 +182,8 @@ actor UsageCoordinator {
     func clearHistory() async throws {
         try await history.clearHistory()
         try await history.clearReceipts()
+        state.providers[.claude]?.claudeStats = nil
+        state.providers[.claude]?.claudeStatsState = .waiting
         state.providers[.codex]?.codexAccount = nil
         state.providers[.codex]?.codexActivityState = .waiting
         await publish()
@@ -236,6 +238,11 @@ actor UsageCoordinator {
                     <= Self.codexActivityFreshness ? .available : .stale
             }
         }
+        if let stats = try? await history.latestClaudeStats() {
+            state.providers[.claude]?.claudeStats = stats
+            state.providers[.claude]?.claudeStatsState = now.timeIntervalSince(stats.capturedAt)
+                <= Self.claudeStatsFreshness ? .available : .stale
+        }
     }
 
     private func acceptSupplement(
@@ -243,7 +250,50 @@ actor UsageCoordinator {
         persist: Bool,
         now: Date = Date()
     ) async {
-        guard case let .codex(refresh) = supplement else { return }
+        switch supplement {
+        case let .claude(refresh):
+            await acceptClaudeStats(refresh, persist: persist, now: now)
+        case let .codex(refresh):
+            await acceptCodexSupplement(refresh, persist: persist, now: now)
+        }
+    }
+
+    private func acceptClaudeStats(
+        _ refresh: ClaudeStatsRefresh,
+        persist: Bool,
+        now: Date
+    ) async {
+        let current = state.providers[.claude]?.claudeStats
+        switch refresh {
+        case let .available(stats):
+            if current.map({ stats.capturedAt >= $0.capturedAt }) ?? true {
+                state.providers[.claude]?.claudeStats = stats
+                if persist { try? await history.recordClaudeStats(stats) }
+            }
+            if let accepted = state.providers[.claude]?.claudeStats {
+                state.providers[.claude]?.claudeStatsState =
+                    now.timeIntervalSince(accepted.capturedAt) <= Self.claudeStatsFreshness
+                    ? .available
+                    : .stale
+            }
+        case .unavailable:
+            state.providers[.claude]?.claudeStatsState = current == nil ? .unavailable : .stale
+        case let .failed(code):
+            state.providers[.claude]?.claudeStatsState = current == nil ? .failed(code) : .stale
+        }
+        await diagnostics.log(
+            .info,
+            category: "provider",
+            event: "claude_local_stats_updated",
+            provider: .claude
+        )
+    }
+
+    private func acceptCodexSupplement(
+        _ refresh: CodexSupplementalRefresh,
+        persist: Bool,
+        now: Date
+    ) async {
         var account = state.providers[.codex]?.codexAccount
             ?? .empty
         account.resetCredits = refresh.resetCredits
@@ -332,6 +382,11 @@ actor UsageCoordinator {
            let activity = state.providers[.codex]?.codexAccount?.tokenActivity,
            now.timeIntervalSince(activity.capturedAt) > Self.codexActivityFreshness {
             state.providers[.codex]?.codexActivityState = .stale
+        }
+        if state.providers[.claude]?.claudeStatsState == .available,
+           let stats = state.providers[.claude]?.claudeStats,
+           now.timeIntervalSince(stats.capturedAt) > Self.claudeStatsFreshness {
+            state.providers[.claude]?.claudeStatsState = .stale
         }
 
         if lastPruneDay.map({ !Calendar.current.isDate($0, inSameDayAs: now) }) ?? true {

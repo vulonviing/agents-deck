@@ -37,7 +37,9 @@ struct ProviderDetailView: View {
                         }
                     }
 
-                    if provider == .codex {
+                    if provider == .claude {
+                        ClaudeStatsActivityView(state: state)
+                    } else {
                         CodexAccountActivityView(state: state)
                     }
                 }
