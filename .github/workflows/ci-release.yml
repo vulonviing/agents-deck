@@ -152,15 +152,15 @@ jobs:
             '' \
             '**Security hardening:** Version 1.0.0 was withdrawn. Version 1.0.1 removes debug entitlements and adds signed source, protected release tags, release-bundle audits, SHA-256 checksums, and GitHub artifact attestations.' \
             '' \
-            '**New in 1.2.1:** Adds an explicitly Local, approximate Claude activity view with Overview and Models tabs plus all-time, 7-day, and 30-day filters.' \
+            '**New in 1.2.2:** Restores the Claude 5-hour reset time when `/usage` emits repeated or partial terminal redraw frames.' \
             '' \
             '**Claude privacy boundary:** Reads only Claude Code aggregate stats through a closed allowlist. Raw JSON, cost/cache fields, session identifiers, unknown fields, transcripts, and credentials are never retained.' \
             '' \
-            '**Reader safety:** Rejects symlinks, non-regular files, relative configuration roots, oversized input, future-dated records, and malformed values; file reads are bounded and nonblocking.' \
+            '**Reset parsing safety:** Keeps Claude windows isolated, accepts only validated future reset times, never estimates a missing reset, and discards raw terminal output after parsing.' \
             '' \
             '**Reset-credit safety:** Shows available Codex reset credits and provider-supplied expiry as read-only information. Agents Deck cannot represent or call the reset-credit consume method.' \
             '' \
-            '**Privacy and reliability:** Removes Claude session-configuration history, keeps provider detail pages content-free, uses a 15-minute stale threshold, and improves menu bar sizing and last-known-value presentation.' \
+            '**Privacy and reliability:** Keeps provider integrations free of conversation content, uses a 15-minute stale threshold, and improves menu bar sizing and last-known-value presentation.' \
             '' \
             '**Distribution notice:** This free build is ad-hoc signed and is not Apple-notarized. Verify the checksum and attestation, then follow the README Open Anyway instructions. Never disable Gatekeeper globally.' \
             '' \

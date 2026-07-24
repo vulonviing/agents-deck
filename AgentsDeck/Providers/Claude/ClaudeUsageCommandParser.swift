@@ -31,10 +31,36 @@ enum ClaudeUsageCommandParser {
         let lowercase = text.lowercased()
         var windows: [UsageWindowKind: UsageWindow] = [:]
         for labels in windowLabels {
-            guard let section = section(for: labels, in: text, lowercase: lowercase),
-                  let window = try parseWindow(section, kind: labels.kind, capturedAt: capturedAt)
-            else { continue }
-            windows[labels.kind] = window
+            let candidates = sections(for: labels, in: text, lowercase: lowercase)
+            var latestWindow: UsageWindow?
+            var latestVerifiedReset: Date?
+
+            // PTY output can contain several redraws of the same /usage screen. The
+            // final redraw occasionally omits the title's reset suffix even though an
+            // earlier frame in this same bounded capture contains it. Take percentage
+            // data from the newest complete candidate and independently retain the
+            // newest validated reset for this window only.
+            for candidate in candidates.reversed() {
+                if latestVerifiedReset == nil {
+                    latestVerifiedReset = resetDate(in: candidate, capturedAt: capturedAt)
+                }
+                if latestWindow == nil {
+                    latestWindow = try parseWindow(
+                        candidate,
+                        kind: labels.kind,
+                        capturedAt: capturedAt
+                    )
+                }
+                if latestWindow != nil, latestVerifiedReset != nil { break }
+            }
+
+            guard let latestWindow else { continue }
+            windows[labels.kind] = UsageWindow(
+                kind: latestWindow.kind,
+                usedPercent: latestWindow.usedPercent,
+                resetsAt: latestWindow.resetsAt ?? latestVerifiedReset,
+                durationMinutes: latestWindow.durationMinutes
+            )
         }
 
         guard !windows.isEmpty else { throw ProviderBoundaryError.invalidPayload }
@@ -47,25 +73,38 @@ enum ClaudeUsageCommandParser {
         )
     }
 
-    private static func section(
+    private static func sections(
         for target: WindowLabels,
         in text: String,
         lowercase: String
-    ) -> String? {
-        let starts = target.labels.compactMap { lowercase.range(of: $0, options: .backwards)?.lowerBound }
-        guard let start = starts.max() else { return nil }
+    ) -> [String] {
+        let targetStarts = target.labels
+            .flatMap { occurrences(of: $0, in: lowercase) }
+            .sorted()
+        guard !targetStarts.isEmpty else { return [] }
 
-        let laterLabels = windowLabels
+        let allStarts = windowLabels
             .flatMap(\.labels)
-            .filter { !target.labels.contains($0) }
-            .compactMap { label -> String.Index? in
-                guard let range = lowercase.range(of: label, range: start..<lowercase.endIndex),
-                      range.lowerBound > start
-                else { return nil }
-                return range.lowerBound
-            }
-        let end = laterLabels.min() ?? text.endIndex
-        return String(text[start..<end].prefix(2_000))
+            .flatMap { occurrences(of: $0, in: lowercase) }
+            .sorted()
+
+        return targetStarts.compactMap { start in
+            let end = allStarts.first(where: { $0 > start }) ?? text.endIndex
+            guard start < end else { return nil }
+            return String(text[start..<end].prefix(2_000))
+        }
+    }
+
+    private static func occurrences(of needle: String, in text: String) -> [String.Index] {
+        var result: [String.Index] = []
+        var searchStart = text.startIndex
+
+        while searchStart < text.endIndex,
+              let range = text.range(of: needle, range: searchStart..<text.endIndex) {
+            result.append(range.lowerBound)
+            searchStart = range.upperBound
+        }
+        return result
     }
 
     private static func parseWindow(
@@ -90,8 +129,13 @@ enum ClaudeUsageCommandParser {
     }
 
     private static func resetDate(in section: String, capturedAt: Date) -> Date? {
-        let lower = section.lowercased()
-        guard lower.contains("reset") else { return nil }
+        guard let resetText = (firstCapture(
+            in: section,
+            pattern: #"(?i)resets?\s*(?:at|on)?\s*[:·\-]?\s*([^\n]{1,120})"#
+        ))?.trimmingCharacters(in: .whitespacesAndNewlines)
+        else { return nil }
+
+        let lower = resetText.lowercased()
 
         let units: [(String, TimeInterval)] = [
             (#"(\d+)\s*(?:days?|d)\b"#, 86_400),
@@ -109,11 +153,6 @@ enum ClaudeUsageCommandParser {
             return capturedAt.addingTimeInterval(relative)
         }
 
-        guard let resetText = (firstCapture(
-            in: section,
-            pattern: #"(?i)resets?\s*(?:at|on)?\s*[:·\-]?\s*([^\n]{3,80})"#
-        ))?.trimmingCharacters(in: .whitespacesAndNewlines)
-        else { return nil }
         if let isoDate = ISO8601DateFormatter().date(from: resetText) {
             return validatedReset(isoDate, capturedAt: capturedAt)
         }
@@ -130,7 +169,10 @@ enum ClaudeUsageCommandParser {
             localResetText = resetText
         }
 
-        if let timeOnlyReset = timeOnlyResetDate(from: localResetText, capturedAt: capturedAt) {
+        if let timeToken = firstCapture(
+            in: localResetText,
+            pattern: #"(?i)\b((?:(?:[01]?\d|2[0-3]):[0-5]\d\s*(?:am|pm)?|(?:1[0-2]|0?[1-9])\s*(?:am|pm)))\b"#
+        ), let timeOnlyReset = timeOnlyResetDate(from: timeToken, capturedAt: capturedAt) {
             return timeOnlyReset
         }
 
