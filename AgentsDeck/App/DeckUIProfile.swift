@@ -17,7 +17,7 @@ enum MenuBarProviderSelection: String, Codable, CaseIterable, Sendable {
         switch self {
         case .claude: [.claude]
         case .codex: [.codex]
-        case .both: ProviderID.allCases
+        case .both: [.claude, .codex]
         }
     }
 }
@@ -53,7 +53,9 @@ struct DeckUIProfile: Codable, Equatable {
 
     var schemaVersion = currentSchemaVersion
     var selectedUsageWindowByProvider: [ProviderID: UsageWindowKind] = [:]
-    var menuBarProviderSelection: MenuBarProviderSelection = .both
+    var selectedAntigravityMetric: AntigravityMetricID?
+    var antigravityGroupOrder = AntigravityQuotaGroup.defaultDisplayOrder
+    var menuBarProviders: [ProviderID] = ProviderID.allCases
     var refreshCadence: RefreshCadence = .oneToThreeMinutes
     var menuBarItemVisible = true
     var panelWidth: Double?
@@ -67,6 +69,9 @@ extension DeckUIProfile {
     private enum CodingKeys: String, CodingKey {
         case schemaVersion
         case selectedUsageWindowByProvider
+        case selectedAntigravityMetric
+        case antigravityGroupOrder
+        case menuBarProviders
         case menuBarProviderSelection
         case refreshCadence
         case menuBarItemVisible
@@ -85,20 +90,31 @@ extension DeckUIProfile {
             [ProviderID: UsageWindowKind].self,
             forKey: .selectedUsageWindowByProvider
         ) ?? [:]
-        if decodedVersion >= 2 {
-            menuBarProviderSelection = try values.decodeIfPresent(
+        selectedAntigravityMetric = try values.decodeIfPresent(
+            AntigravityMetricID.self,
+            forKey: .selectedAntigravityMetric
+        )
+        antigravityGroupOrder = AntigravityQuotaGroup.normalizedDisplayOrder(
+            (try? values.decode([AntigravityQuotaGroup].self, forKey: .antigravityGroupOrder)) ?? []
+        )
+        if let selected = try? values.decode([ProviderID].self, forKey: .menuBarProviders) {
+            menuBarProviders = Self.normalizedMenuBarProviders(selected)
+        } else if decodedVersion >= 2 {
+            let legacy = try values.decodeIfPresent(
                 MenuBarProviderSelection.self,
                 forKey: .menuBarProviderSelection
             ) ?? .both
+            menuBarProviders = Self.normalizedMenuBarProviders(legacy.providers + [.antigravity])
         } else {
             let provider = try values.decodeIfPresent(ProviderID.self, forKey: .selectedMenuBarProviderID)
             let mode = try values.decodeIfPresent(LegacyMenuBarDisplayMode.self, forKey: .menuBarDisplayMode)
                 ?? .single
-            menuBarProviderSelection = switch (mode, provider) {
-            case (.dual, _): .both
-            case (.single, .claude): .claude
-            case (.single, .codex): .codex
-            case (.single, nil): .both
+            menuBarProviders = switch (mode, provider) {
+            case (.dual, _): ProviderID.allCases
+            case (.single, .claude): [.claude]
+            case (.single, .codex): [.codex]
+            case (.single, .antigravity): [.antigravity]
+            case (.single, nil): ProviderID.allCases
             }
         }
         refreshCadence = try values.decodeIfPresent(RefreshCadence.self, forKey: .refreshCadence) ?? .oneToThreeMinutes
@@ -112,12 +128,32 @@ extension DeckUIProfile {
         var values = encoder.container(keyedBy: CodingKeys.self)
         try values.encode(Self.currentSchemaVersion, forKey: .schemaVersion)
         try values.encode(selectedUsageWindowByProvider, forKey: .selectedUsageWindowByProvider)
-        try values.encode(menuBarProviderSelection, forKey: .menuBarProviderSelection)
+        try values.encodeIfPresent(selectedAntigravityMetric, forKey: .selectedAntigravityMetric)
+        try values.encode(antigravityGroupOrder, forKey: .antigravityGroupOrder)
+        try values.encode(menuBarProviders, forKey: .menuBarProviders)
         try values.encode(refreshCadence, forKey: .refreshCadence)
         try values.encode(menuBarItemVisible, forKey: .menuBarItemVisible)
         try values.encodeIfPresent(panelWidth, forKey: .panelWidth)
         try values.encodeIfPresent(panelHeight, forKey: .panelHeight)
         try values.encodeIfPresent(panelLayoutVersion, forKey: .panelLayoutVersion)
+    }
+
+    static func normalizedMenuBarProviders(_ proposed: [ProviderID]) -> [ProviderID] {
+        let selected = Set(proposed)
+        let result = ProviderID.allCases.filter { selected.contains($0) }
+        return result.isEmpty ? ProviderID.allCases : result
+    }
+
+    mutating func moveAntigravityGroup(_ source: AntigravityQuotaGroup, to destination: AntigravityQuotaGroup) -> Bool {
+        var order = AntigravityQuotaGroup.normalizedDisplayOrder(antigravityGroupOrder)
+        guard source != destination,
+              let sourceIndex = order.firstIndex(of: source),
+              let destinationIndex = order.firstIndex(of: destination)
+        else { return false }
+        order.remove(at: sourceIndex)
+        order.insert(source, at: destinationIndex)
+        antigravityGroupOrder = order
+        return true
     }
 }
 

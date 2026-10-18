@@ -3,6 +3,7 @@ import Foundation
 enum ProviderID: String, Codable, CaseIterable, Identifiable, Sendable {
     case claude
     case codex
+    case antigravity
 
     var id: String { rawValue }
 
@@ -10,6 +11,7 @@ enum ProviderID: String, Codable, CaseIterable, Identifiable, Sendable {
         switch self {
         case .claude: "Claude"
         case .codex: "Codex"
+        case .antigravity: "Antigravity"
         }
     }
 
@@ -33,6 +35,38 @@ enum UsageSource: String, Codable, Sendable {
     case claudeStatusLine
     case claudeUsageCommand
     case codexAppServer
+    case antigravityUsageCommand
+}
+
+enum AntigravityQuotaGroup: String, Codable, CaseIterable, Identifiable, Sendable {
+    case geminiModels
+    case claudeAndGPTModels
+    case gemini4Argon
+
+    var id: String { rawValue }
+
+    static let defaultDisplayOrder: [Self] = [.gemini4Argon, .geminiModels, .claudeAndGPTModels]
+
+    static func normalizedDisplayOrder(_ proposed: [Self]) -> [Self] {
+        var result: [Self] = []
+        for group in proposed + defaultDisplayOrder where !result.contains(group) {
+            result.append(group)
+        }
+        return result
+    }
+
+    var displayName: String {
+        switch self {
+        case .geminiModels: "Gemini Models"
+        case .claudeAndGPTModels: "Claude and GPT Models"
+        case .gemini4Argon: "Gemini 4 Argon"
+        }
+    }
+}
+
+enum QuotaWindowState: Codable, Equatable, Sendable {
+    case available(UsageWindow)
+    case disabled
 }
 
 struct UsageWindow: Codable, Equatable, Sendable {
@@ -152,6 +186,40 @@ struct UsageSnapshot: Codable, Equatable, Sendable {
     let source: UsageSource
     let windows: [UsageWindowKind: UsageWindow]
     let billing: ProviderBillingValue?
+    let groupedWindows: [AntigravityQuotaGroup: [UsageWindowKind: QuotaWindowState]]
+
+    init(
+        provider: ProviderID,
+        capturedAt: Date,
+        source: UsageSource,
+        windows: [UsageWindowKind: UsageWindow],
+        billing: ProviderBillingValue?,
+        groupedWindows: [AntigravityQuotaGroup: [UsageWindowKind: QuotaWindowState]] = [:]
+    ) {
+        self.provider = provider
+        self.capturedAt = capturedAt
+        self.source = source
+        self.windows = windows
+        self.billing = billing
+        self.groupedWindows = groupedWindows
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case provider, capturedAt, source, windows, billing, groupedWindows
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        provider = try values.decode(ProviderID.self, forKey: .provider)
+        capturedAt = try values.decode(Date.self, forKey: .capturedAt)
+        source = try values.decode(UsageSource.self, forKey: .source)
+        windows = try values.decode([UsageWindowKind: UsageWindow].self, forKey: .windows)
+        billing = try values.decodeIfPresent(ProviderBillingValue.self, forKey: .billing)
+        groupedWindows = try values.decodeIfPresent(
+            [AntigravityQuotaGroup: [UsageWindowKind: QuotaWindowState]].self,
+            forKey: .groupedWindows
+        ) ?? [:]
+    }
 
     subscript(kind: UsageWindowKind) -> UsageWindow? {
         windows[kind]

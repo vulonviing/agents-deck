@@ -73,6 +73,19 @@ enum UsageAlgorithms {
         guard let previous else { return true }
         if snapshot.capturedAt.timeIntervalSince(previous.capturedAt) >= heartbeat { return true }
         if snapshot.billing != previous.billing { return true }
+        for group in AntigravityQuotaGroup.allCases {
+            for kind in UsageWindowKind.allCases {
+                let current = snapshot.groupedWindows[group]?[kind]
+                let old = previous.groupedWindows[group]?[kind]
+                switch (current, old) {
+                case (nil, nil), (.disabled, .disabled): break
+                case let (.available(new), .available(prior)):
+                    if new.resetsAt != prior.resetsAt || new.durationMinutes != prior.durationMinutes
+                        || abs(new.usedPercent - prior.usedPercent) >= 1 { return true }
+                default: return true
+                }
+            }
+        }
 
         for kind in UsageWindowKind.allCases {
             let current = snapshot[kind]

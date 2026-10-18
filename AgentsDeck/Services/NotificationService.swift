@@ -13,6 +13,7 @@ actor NotificationService {
     }
 
     func evaluate(_ snapshot: UsageSnapshot, receipts: any HistoryStoring) async {
+        guard snapshot.provider != .antigravity else { return }
         guard UsageAlgorithms.isFresh(snapshot) else { return }
         for kind in UsageWindowKind.allCases {
             guard let window = snapshot[kind], let reset = window.resetsAt else { continue }

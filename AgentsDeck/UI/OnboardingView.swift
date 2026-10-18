@@ -45,7 +45,7 @@ struct OnboardingView: View {
     private var content: some View {
         switch step {
         case 0:
-            Text("Agents Deck reads verified usage from the Claude and Codex tools already installed on this Mac. There is no Agents Deck account, server, telemetry, or cloud sync.")
+            Text("Agents Deck reads verified usage from the Claude, Codex, and Antigravity tools already installed on this Mac. There is no Agents Deck account, server, telemetry, or cloud sync.")
                 .foregroundStyle(.secondary)
         case 1:
             providerStatus
@@ -55,7 +55,8 @@ struct OnboardingView: View {
         case 2:
             setupRow(.codex, actionTitle: "Connect Codex") { model.connect(.codex) }
             setupRow(.claude, actionTitle: "Copy login command") { model.openClaudeLogin() }
-            Text("Claude authentication remains in Terminal. Codex opens the official app-server login page in your browser.")
+            setupRow(.antigravity, actionTitle: "Open CLI") { model.openAntigravityCLI() }
+            Text("Claude and Antigravity authentication stay in Terminal. Codex opens the official app-server login page in your browser.")
                 .font(DeckDesign.font(11))
                 .foregroundStyle(.secondary)
         case 3:
@@ -67,7 +68,7 @@ struct OnboardingView: View {
                 .disabled(!bridgeConsent)
                 .deckInteractive(help: "Install the reversible Claude live-update bridge")
         case 4:
-            Text("Optional alerts appear once at 80% and once at 95% for each provider window. They reset only when the provider reports a new limit window.")
+            Text("Optional Claude and Codex alerts appear once at 80% and once at 95% for each usage window. Antigravity does not send alerts.")
                 .foregroundStyle(.secondary)
             Button(model.notificationsGranted ? "Notifications enabled" : "Enable Notifications") {
                 model.requestNotifications()

@@ -148,11 +148,13 @@ jobs:
 
           release_notes="${RUNNER_TEMP}/agents-deck-release-notes.md"
           printf '%s\n' \
-            'Agents Deck is a local-only macOS menu bar utility for verified Claude Code and Codex usage.' \
+            'Agents Deck is a local-only macOS menu bar utility for verified Claude Code, Codex, and Antigravity CLI usage.' \
             '' \
             '**Security hardening:** Version 1.0.0 was withdrawn. Version 1.0.1 removes debug entitlements and adds signed source, protected release tags, release-bundle audits, SHA-256 checksums, and GitHub artifact attestations.' \
             '' \
-            '**New in 1.2.2:** Restores the Claude 5-hour reset time when `/usage` emits repeated or partial terminal redraw frames.' \
+            '**New in 1.3.0:** Adds the three Antigravity quota groups, selectable menu bar percentages for all three providers, draggable Antigravity group order, and restored full-height panel sizing.' \
+            '' \
+            '**Antigravity privacy boundary:** Reads the official CLI `/usage` command, keeps only normalized quota percentages and reset times, and never reads credentials, conversations, or settings.' \
             '' \
             '**Claude privacy boundary:** Reads only Claude Code aggregate stats through a closed allowlist. Raw JSON, cost/cache fields, session identifiers, unknown fields, transcripts, and credentials are never retained.' \
             '' \

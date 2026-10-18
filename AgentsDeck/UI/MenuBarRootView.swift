@@ -67,7 +67,7 @@ struct MenuBarRootView: View {
                                     systemImage: model.refreshCadence == cadence ? "checkmark" : "clock"
                                 )
                             }
-                            .help("Refresh both providers every \(cadence.displayName.lowercased())")
+                            .help("Refresh providers every \(cadence.displayName.lowercased())")
                         }
                     } label: {
                         Image(systemName: "timer")
@@ -80,28 +80,26 @@ struct MenuBarRootView: View {
                     )
 
                     Menu {
-                        ForEach(MenuBarProviderSelection.allCases, id: \.self) { selection in
+                        ForEach(ProviderID.allCases) { provider in
                             Button {
-                                model.setMenuBarProviderSelection(selection)
+                                model.toggleMenuBarProvider(provider)
                             } label: {
                                 HStack(spacing: 7) {
-                                    ProviderSelectionMark(selection: selection)
-                                        .frame(width: 18, height: 18)
-                                    Text(selection.displayName)
-                                    if model.menuBarProviderSelection == selection {
-                                        Image(systemName: "checkmark")
-                                    }
+                                    Image(systemName: model.menuBarProviders.contains(provider) ? "checkmark.square.fill" : "square")
+                                    ProviderSelectionMark(providers: [provider])
+                                    Text(provider.displayName)
                                 }
                             }
+                            .disabled(model.menuBarProviders == [provider])
                         }
                     } label: {
-                        ProviderSelectionMark(selection: model.menuBarProviderSelection)
-                            .frame(width: 30, height: 30)
+                        ProviderSelectionMark(providers: model.menuBarProviders)
+                            .frame(minWidth: 30, minHeight: 30)
                     }
                     .menuStyle(.button)
                     .buttonStyle(.glass)
                     .deckInteractive(
-                        help: "Choose providers shown in the menu bar. Current: \(model.menuBarProviderSelection.displayName)"
+                        help: "Choose providers shown in the menu bar"
                     )
                     .accessibilityLabel("Choose providers shown in the menu bar")
 
@@ -111,7 +109,7 @@ struct MenuBarRootView: View {
                             .frame(width: 30, height: 30)
                     }
                     .buttonStyle(.glass)
-                    .deckInteractive(help: "Refresh Claude and Codex now")
+                    .deckInteractive(help: "Refresh all providers now")
                     .accessibilityLabel("Refresh usage")
                 }
             }
@@ -128,10 +126,14 @@ struct MenuBarRootView: View {
                             ProviderCardView(
                                 state: model.state.providers[provider] ?? .empty(provider),
                                 preferredKind: model.selectedUsageWindow(for: provider),
+                                selectedAntigravityMetric: model.selectedAntigravityMetric(),
+                                antigravityGroupOrder: model.antigravityGroupOrder,
                                 onShowDetails: {
                                     detailProvider = provider
                                 },
-                                onSelectWindow: { model.selectUsageWindow($0, for: provider) }
+                                onSelectWindow: { model.selectUsageWindow($0, for: provider) },
+                                onSelectAntigravityMetric: { model.selectAntigravityMetric($0) },
+                                onMoveAntigravityGroup: { model.moveAntigravityGroup($0, to: $1) }
                             )
                         }
                     }
@@ -161,50 +163,44 @@ struct MenuBarRootView: View {
 }
 
 private struct ProviderSelectionMark: View {
-    let selection: MenuBarProviderSelection
+    let providers: [ProviderID]
 
     var body: some View {
-        Image(nsImage: selection.compactMenuImage)
+        Image(nsImage: markImage)
             .renderingMode(.template)
             .foregroundStyle(.primary)
+            .frame(width: markWidth, height: 18)
+            .clipped()
         .accessibilityHidden(true)
     }
-}
 
-private extension MenuBarProviderSelection {
-    @MainActor
-    var compactMenuImage: NSImage {
-        ProviderSelectionImageCache.images[self] ?? NSImage(size: NSSize(width: 18, height: 18))
+    private var markWidth: CGFloat {
+        CGFloat(providers.count * 15 + max(0, providers.count - 1) * 2)
     }
-}
 
-@MainActor
-private enum ProviderSelectionImageCache {
-    static let images: [MenuBarProviderSelection: NSImage] = Dictionary(
-        uniqueKeysWithValues: MenuBarProviderSelection.allCases.map { selection in
-            (selection, makeImage(for: selection))
-        }
-    )
-
-    private static func makeImage(for selection: MenuBarProviderSelection) -> NSImage {
-        let canvas = NSSize(width: 18, height: 18)
-        let image = NSImage(size: canvas, flipped: false) { _ in
-            let providers = selection.providers
-            let markSize: CGFloat = providers.count == 1 ? 16 : 9
-            let spacing: CGFloat = providers.count == 1 ? 0 : 1
-            let totalWidth = CGFloat(providers.count) * markSize + CGFloat(max(0, providers.count - 1)) * spacing
-            var x = (canvas.width - totalWidth) / 2
-            for provider in providers {
-                let name = provider == .claude ? "ClaudeProviderMark" : "CodexProviderMark"
-                guard let mark = NSImage(named: NSImage.Name(name)) else { continue }
-                let rect = NSRect(x: x, y: (canvas.height - markSize) / 2, width: markSize, height: markSize)
-                mark.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1)
-                x += markSize + spacing
+    private var markImage: NSImage {
+        let size = NSSize(width: markWidth, height: 18)
+        let image = NSImage(size: size, flipped: false) { _ in
+            for (index, provider) in providers.enumerated() {
+                guard let mark = NSImage(named: NSImage.Name(markName(for: provider))) else { continue }
+                mark.draw(
+                    in: NSRect(x: CGFloat(index * 17), y: 1.5, width: 15, height: 15),
+                    from: .zero,
+                    operation: .sourceOver,
+                    fraction: 1
+                )
             }
             return true
         }
-        image.size = canvas
         image.isTemplate = true
         return image
+    }
+
+    private func markName(for provider: ProviderID) -> String {
+        switch provider {
+        case .claude: "ClaudeProviderMark"
+        case .codex: "CodexProviderMark"
+        case .antigravity: "AntigravityProviderMark"
+        }
     }
 }

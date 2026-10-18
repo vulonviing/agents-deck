@@ -14,7 +14,7 @@ final class AppModel {
 
     var state = AppViewState()
     var stateDidChange: (@MainActor (AppViewState) -> Void)?
-    private(set) var menuBarProviderSelection: MenuBarProviderSelection
+    private(set) var menuBarProviders: [ProviderID]
     private(set) var refreshCadence: RefreshCadence
     private(set) var isMenuBarItemVisible: Bool
     var presentedError: String?
@@ -30,7 +30,7 @@ final class AppModel {
         self.uiProfileStore = uiProfileStore
         let profile = uiProfileStore.load()
         self.uiProfile = profile
-        self.menuBarProviderSelection = profile.menuBarProviderSelection
+        self.menuBarProviders = profile.menuBarProviders
         self.refreshCadence = profile.refreshCadence
         self.isMenuBarItemVisible = profile.menuBarItemVisible
     }
@@ -60,10 +60,17 @@ final class AppModel {
         Task { await coordinator.manualRefresh() }
     }
 
-    func setMenuBarProviderSelection(_ selection: MenuBarProviderSelection) {
-        guard menuBarProviderSelection != selection else { return }
-        menuBarProviderSelection = selection
-        uiProfile.menuBarProviderSelection = selection
+    func toggleMenuBarProvider(_ provider: ProviderID) {
+        var selected = menuBarProviders
+        if let index = selected.firstIndex(of: provider) {
+            guard selected.count > 1 else { return }
+            selected.remove(at: index)
+        } else {
+            selected.append(provider)
+        }
+        selected = DeckUIProfile.normalizedMenuBarProviders(selected)
+        menuBarProviders = selected
+        uiProfile.menuBarProviders = selected
         persistUIProfile()
         stateDidChange?(state)
     }
@@ -102,6 +109,26 @@ final class AppModel {
         stateDidChange?(state)
     }
 
+    func selectedAntigravityMetric() -> AntigravityMetricID? {
+        uiProfile.selectedAntigravityMetric
+    }
+
+    func selectAntigravityMetric(_ metric: AntigravityMetricID) {
+        guard uiProfile.selectedAntigravityMetric != metric else { return }
+        uiProfile.selectedAntigravityMetric = metric
+        persistUIProfile()
+        stateDidChange?(state)
+    }
+
+    var antigravityGroupOrder: [AntigravityQuotaGroup] {
+        uiProfile.antigravityGroupOrder
+    }
+
+    func moveAntigravityGroup(_ source: AntigravityQuotaGroup, to destination: AntigravityQuotaGroup) {
+        guard uiProfile.moveAntigravityGroup(source, to: destination) else { return }
+        persistUIProfile()
+    }
+
     func resolvedPanelSize() -> NSSize {
         let size = PanelSizePolicy.resolvedSize(
             storedWidth: uiProfile.panelWidth ?? 0,
@@ -138,6 +165,7 @@ final class AppModel {
             switch provider {
             case .claude: await coordinator.connectClaude()
             case .codex: await coordinator.connectCodex()
+            case .antigravity: await coordinator.restart(.antigravity)
             }
         }
     }
@@ -146,10 +174,23 @@ final class AppModel {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString("claude auth login --claudeai", forType: .string)
         let terminal = URL(filePath: "/System/Applications/Utilities/Terminal.app")
-        NSWorkspace.shared.openApplication(at: terminal, configuration: .init()) { _, error in
+        NSWorkspace.shared.openApplication(at: terminal, configuration: .init()) { [weak self] _, error in
             if error != nil {
                 Task { @MainActor [weak self] in
                     self?.presentedError = "Could not open Terminal. The login command is on your clipboard."
+                }
+            }
+        }
+    }
+
+    func openAntigravityCLI() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString("agy", forType: .string)
+        let terminal = URL(filePath: "/System/Applications/Utilities/Terminal.app")
+        NSWorkspace.shared.openApplication(at: terminal, configuration: .init()) { [weak self] _, error in
+            if error != nil {
+                Task { @MainActor [weak self] in
+                    self?.presentedError = "Could not open Terminal. The Antigravity command is on your clipboard."
                 }
             }
         }
