@@ -20,6 +20,7 @@ final class UsageRecord {
     var billingLimitValue: String?
     var billingRemainingPercent: Int?
     var billingReset: Date?
+    var groupedWindowsPayload: Data?
 
     init(snapshot: UsageSnapshot, minuteKey: String) {
         self.minuteKey = minuteKey
@@ -39,6 +40,8 @@ final class UsageRecord {
         self.billingLimitValue = snapshot.billing?.limitDisplayValue
         self.billingRemainingPercent = snapshot.billing?.remainingPercent
         self.billingReset = snapshot.billing?.resetsAt
+        self.groupedWindowsPayload = snapshot.groupedWindows.isEmpty
+            ? nil : try? JSONEncoder().encode(snapshot.groupedWindows)
     }
 
     func update(with snapshot: UsageSnapshot) {
@@ -57,6 +60,8 @@ final class UsageRecord {
         billingLimitValue = snapshot.billing?.limitDisplayValue
         billingRemainingPercent = snapshot.billing?.remainingPercent
         billingReset = snapshot.billing?.resetsAt
+        groupedWindowsPayload = snapshot.groupedWindows.isEmpty
+            ? nil : try? JSONEncoder().encode(snapshot.groupedWindows)
     }
 
     func snapshot() -> UsageSnapshot? {
@@ -106,7 +111,17 @@ final class UsageRecord {
         case nil:
             billing = nil
         }
-        return UsageSnapshot(provider: provider, capturedAt: capturedAt, source: source, windows: windows, billing: billing)
+        let groupedWindows = groupedWindowsPayload.flatMap {
+            try? JSONDecoder().decode([AntigravityQuotaGroup: [UsageWindowKind: QuotaWindowState]].self, from: $0)
+        } ?? [:]
+        return UsageSnapshot(
+            provider: provider,
+            capturedAt: capturedAt,
+            source: source,
+            windows: windows,
+            billing: billing,
+            groupedWindows: groupedWindows
+        )
     }
 }
 
@@ -207,6 +222,7 @@ protocol HistoryStoring: Sendable {
     func record(_ snapshot: UsageSnapshot) async throws
     func latestSnapshot(for provider: ProviderID) async throws -> UsageSnapshot?
     func history(for provider: ProviderID, kind: UsageWindowKind, since: Date) async throws -> [HistoryPoint]
+    func history(for group: AntigravityQuotaGroup, kind: UsageWindowKind, since: Date) async throws -> [HistoryPoint]
     func hasReceipt(_ key: String) async throws -> Bool
     func saveReceipt(_ key: String) async throws
     func prune(before cutoff: Date) async throws
@@ -303,6 +319,20 @@ actor SwiftDataHistoryStore: HistoryStoring {
                 durationMinutes: duration
             )
         }
+    }
+
+    func history(for group: AntigravityQuotaGroup, kind: UsageWindowKind, since: Date) throws -> [HistoryPoint] {
+        try modelContext.fetch(FetchDescriptor<UsageRecord>(
+            sortBy: [SortDescriptor(\.capturedAt)]
+        )).filter { $0.providerRaw == ProviderID.antigravity.rawValue && $0.capturedAt >= since }
+            .compactMap { record in
+                guard case let .available(window) = record.snapshot()?.groupedWindows[group]?[kind] else { return nil }
+                return HistoryPoint(
+                    id: UUID(), provider: .antigravity, capturedAt: record.capturedAt,
+                    usedPercent: window.usedPercent, resetsAt: window.resetsAt,
+                    windowKind: kind, durationMinutes: window.durationMinutes
+                )
+            }
     }
 
     func hasReceipt(_ key: String) throws -> Bool {
@@ -414,6 +444,17 @@ actor InMemoryHistoryStore: HistoryStoring {
                 resetsAt: window.resetsAt,
                 windowKind: kind,
                 durationMinutes: window.durationMinutes
+            )
+        }.sorted { $0.capturedAt < $1.capturedAt }
+    }
+
+    func history(for group: AntigravityQuotaGroup, kind: UsageWindowKind, since: Date) -> [HistoryPoint] {
+        snapshots.filter { $0.provider == .antigravity && $0.capturedAt >= since }.compactMap { snapshot in
+            guard case let .available(window) = snapshot.groupedWindows[group]?[kind] else { return nil }
+            return HistoryPoint(
+                id: UUID(), provider: .antigravity, capturedAt: snapshot.capturedAt,
+                usedPercent: window.usedPercent, resetsAt: window.resetsAt,
+                windowKind: kind, durationMinutes: window.durationMinutes
             )
         }.sorted { $0.capturedAt < $1.capturedAt }
     }

@@ -6,7 +6,7 @@ enum DeckDesign {
     static let popoverMaximumWidth: CGFloat = 600
     static let popoverMinimumHeight: CGFloat = 440
     static let popoverIdealHeight: CGFloat = 520
-    static let popoverMaximumHeight: CGFloat = 680
+    static let popoverMaximumHeight: CGFloat = 1_100
     static let cornerRadius: CGFloat = 18
     static let pagePadding: CGFloat = 16
     static let windowCoral = Color(red: 0.941, green: 0.600, blue: 0.482)

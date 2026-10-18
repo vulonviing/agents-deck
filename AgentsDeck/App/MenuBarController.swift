@@ -128,7 +128,8 @@ final class MenuBarController: NSObject, NSWindowDelegate {
             MenuBarRootView(sessionID: UUID())
                 .environment(model)
         )
-        panel.setContentSize(model.resolvedPanelSize())
+        let savedSize = model.resolvedPanelSize()
+        panel.setFrame(NSRect(origin: panel.frame.origin, size: savedSize), display: false)
         positionPanel()
         panel.makeKeyAndOrderFront(nil)
         model.popoverOpened()
@@ -152,12 +153,22 @@ final class MenuBarController: NSObject, NSWindowDelegate {
         let buttonInWindow = button.convert(button.bounds, to: nil)
         let buttonOnScreen = window.convertToScreen(buttonInWindow)
         let visible = screen.visibleFrame
+        let maximumWidth = min(DeckDesign.popoverMaximumWidth, visible.width - 16)
+        let maximumHeight = min(DeckDesign.popoverMaximumHeight, buttonOnScreen.minY - visible.minY - 8)
+        panel.maxSize = NSSize(
+            width: max(DeckDesign.popoverMinimumWidth, maximumWidth),
+            height: max(DeckDesign.popoverMinimumHeight, maximumHeight)
+        )
+        let restoredSize = PanelSizePolicy.fittedSize(panel.frame.size, maximumSize: panel.maxSize)
+        if restoredSize != panel.frame.size {
+            panel.setFrame(NSRect(origin: panel.frame.origin, size: restoredSize), display: false)
+        }
         var origin = NSPoint(
             x: buttonOnScreen.midX - panel.frame.width / 2,
             y: buttonOnScreen.minY - panel.frame.height - 8
         )
         origin.x = min(max(origin.x, visible.minX + 8), visible.maxX - panel.frame.width - 8)
-        origin.y = max(origin.y, visible.minY + 8)
+        origin.y = max(origin.y, visible.minY)
         panel.setFrameOrigin(origin)
     }
 
@@ -200,8 +211,9 @@ final class MenuBarController: NSObject, NSWindowDelegate {
         }.compactMap { provider, kind in kind.map { (provider, $0) } })
         let displays = MenuBarPresentation.displays(
             for: state,
-            selection: model.menuBarProviderSelection,
-            selectedWindowKinds: selectedWindows
+            providers: model.menuBarProviders,
+            selectedWindowKinds: selectedWindows,
+            selectedAntigravityMetric: model.selectedAntigravityMetric()
         )
         statusDisplays = displays
         hoveredStatusProvider = displays.contains { $0.provider == hoveredStatusProvider }
@@ -275,7 +287,11 @@ final class MenuBarController: NSObject, NSWindowDelegate {
     }
 
     private func statusImage(for provider: ProviderID) -> NSImage? {
-        let assetName = provider == .claude ? "ClaudeProviderMark" : "CodexProviderMark"
+        let assetName: String = switch provider {
+        case .claude: "ClaudeProviderMark"
+        case .codex: "CodexProviderMark"
+        case .antigravity: "AntigravityProviderMark"
+        }
         guard let source = NSImage(named: NSImage.Name(assetName))
         else {
             return NSImage(systemSymbolName: "gauge.with.dots.needle.0percent", accessibilityDescription: nil)
@@ -398,6 +414,14 @@ final class MenuBarController: NSObject, NSWindowDelegate {
 enum PanelSizePolicy {
     static let currentLayoutVersion = 2
 
+    static func fittedSize(_ storedSize: NSSize, maximumSize: NSSize) -> NSSize {
+        let height = min(storedSize.height, maximumSize.height)
+        return NSSize(
+            width: min(storedSize.width, maximumSize.width),
+            height: maximumSize.height - height <= 24 ? maximumSize.height : height
+        )
+    }
+
     static func resolvedSize(
         storedWidth: Double,
         storedHeight: Double,
@@ -489,15 +513,17 @@ struct MenuBarProviderDisplay: Identifiable, Equatable, Sendable {
 enum MenuBarPresentation {
     static func displays(
         for state: AppViewState,
-        selection: MenuBarProviderSelection,
+        providers: [ProviderID],
         selectedWindowKinds: [ProviderID: UsageWindowKind],
+        selectedAntigravityMetric: AntigravityMetricID? = nil,
         now: Date = Date()
     ) -> [MenuBarProviderDisplay] {
-        selection.providers.map { provider in
+        return providers.map { provider in
             providerDisplay(
                 provider,
                 state: state,
                 selectedWindowKind: selectedWindowKinds[provider],
+                selectedAntigravityMetric: selectedAntigravityMetric,
                 now: now
             )
         }
@@ -541,14 +567,27 @@ enum MenuBarPresentation {
         _ provider: ProviderID,
         state: AppViewState,
         selectedWindowKind: UsageWindowKind?,
+        selectedAntigravityMetric: AntigravityMetricID?,
         now: Date
     ) -> MenuBarProviderDisplay {
         guard let providerState = state.providers[provider],
               let snapshot = providerState.snapshot,
-              let window = selectedWindowKind.flatMap({ snapshot[$0] }) ?? snapshot.preferredGaugeWindow
+              UsageAlgorithms.isFresh(snapshot, now: now)
         else {
             return MenuBarProviderDisplay(provider: provider, percent: nil)
         }
+        let window: UsageWindow?
+        if provider == .antigravity {
+            let metric = selectedAntigravityMetric ?? AntigravityMetricID(group: .gemini4Argon, kind: .sevenDay)
+            if case let .available(value) = snapshot.groupedWindows[metric.group]?[metric.kind] {
+                window = value
+            } else {
+                window = nil
+            }
+        } else {
+            window = snapshot[selectedWindowKind ?? .fiveHour]
+        }
+        guard let window else { return MenuBarProviderDisplay(provider: provider, percent: nil) }
         return MenuBarProviderDisplay(provider: provider, percent: Int(window.usedPercent.rounded()))
     }
 }

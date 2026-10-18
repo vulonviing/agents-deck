@@ -39,7 +39,7 @@ struct ProviderDetailView: View {
 
                     if provider == .claude {
                         ClaudeStatsActivityView(state: state)
-                    } else {
+                    } else if provider == .codex {
                         CodexAccountActivityView(state: state)
                     }
                 }
@@ -51,7 +51,11 @@ struct ProviderDetailView: View {
     }
 
     private var sourceLabel: String {
-        provider == .claude ? "Claude status-line bridge" : "Codex app-server"
+        switch provider {
+        case .claude: "Claude status-line bridge"
+        case .codex: "Codex app-server"
+        case .antigravity: "Antigravity CLI /usage"
+        }
     }
 
     private func detailRow(_ label: String, _ value: String) -> some View {

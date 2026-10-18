@@ -2,20 +2,20 @@
 
 # Agents Deck
 
-Agents Deck is a small, local-only macOS menu bar app for monitoring verified Claude Code and Codex subscription usage.
+Agents Deck is a small, local-only macOS menu bar app for monitoring verified Claude Code, Codex, and Antigravity CLI subscription usage.
 
 It shows each provider's verified usage windows with their real durations, reset times, provider-supplied session cost or Codex credit information, and freshness. There is no Agents Deck account, backend, telemetry, cloud sync, or App Store dependency.
 
-> Agents Deck is an independent open-source project. It is not affiliated with Anthropic or OpenAI.
+> Agents Deck is an independent open-source project. It is not affiliated with Anthropic, OpenAI, or Google.
 
 ## Download and install
 
-1. Download `Agents-Deck-1.2.2.dmg` and its `.sha256` file from the latest [GitHub Release](https://github.com/vulonviing/agents-deck/releases/latest).
+1. Download `Agents-Deck-1.3.0.dmg` and its `.sha256` file from the latest [GitHub Release](https://github.com/vulonviing/agents-deck/releases/latest).
 2. Optionally verify the download:
 
    ```sh
-   shasum -a 256 -c Agents-Deck-1.2.2.sha256
-   gh attestation verify Agents-Deck-1.2.2.dmg --repo vulonviing/agents-deck
+   shasum -a 256 -c Agents-Deck-1.3.0.sha256
+   gh attestation verify Agents-Deck-1.3.0.dmg --repo vulonviing/agents-deck
    ```
 
 3. Open the DMG and drag **Agents Deck** to **Applications**.
@@ -41,7 +41,8 @@ The bundle identifier remains stable, and application data under `~/Library/Appl
 - At least one of:
   - [Claude Code](https://code.claude.com/docs/en/overview)
   - [OpenAI Codex CLI](https://developers.openai.com/codex/cli)
-- An individual Claude or ChatGPT/Codex subscription with usage data available to its official CLI
+  - [Google Antigravity CLI](https://www.antigravity.google/docs/getting-started?tab=cli)
+- An individual subscription with usage data available to at least one of these official CLIs
 
 ## Build from source
 
@@ -51,7 +52,7 @@ Building requires a full Xcode installation that supports macOS 26 and Swift 6. 
 2. Open `AgentsDeck.xcodeproj` in Xcode.
 3. Select the shared `AgentsDeck` scheme and the `My Mac` destination.
 4. Press **Run**.
-5. Complete the local setup guide. You can configure Claude, Codex, or both.
+5. Complete the local setup guide. You can configure any combination of Claude, Codex, and Antigravity.
 
 The command-line build check is:
 
@@ -98,12 +99,18 @@ The same detail page shows the available reset-credit count and nearest provider
 
 Codex window durations are supplied by app-server and may differ by account. Agents Deck labels the actual duration and uses the shortest verified window for the card gauge. If Codex supplies only a seven-day window, the card still shows it; the menu-bar percentage remains unavailable unless a verified window shorter than seven days exists. Billing is shown only when app-server supplies an individual monthly limit or credit balance. Otherwise the card says `Cost · Not provided` rather than estimating money from tokens.
 
+### Antigravity
+
+Agents Deck runs the official CLI's read-only `agy -p "/usage" --output-format json` command once per refresh. Google's [CLI changelog](https://www.antigravity.google/docs/changelog?tab=cli) says print-mode `/usage` does not start an agent turn or spend model quota. Its bounded output is reduced in memory to the Gemini 4 Argon, Gemini Models, and Claude and GPT Models quota groups. The panel shows **used** percentage (`100 − remaining`) for each available five-hour or weekly limit, provider-supplied reset times, and explicit `Disabled` states. Missing values stay `--`.
+
+Antigravity refreshes on startup, panel open, manual refresh, and an independent randomized deadline within the selected cadence. Sign in through `agy` in Terminal if needed. Agents Deck does not read Antigravity credentials, transcripts, or settings, and does not install a status-line bridge.
+
 ## Menu bar interaction
 
 - Left-click the menu bar item to open a resizable usage panel. Drag a panel edge or corner to resize it; the last size is restored on the next open.
-- Click a usage ring or its metric row to select that window. The center defaults to the lowest verified percentage whenever the panel opens.
-- Use the provider menu beside Refresh to show Claude, Codex, or both in the menu bar. Each segment follows that provider card's selected usage window.
-- Click a provider card's logo or name to open its detail page. Both providers show connection diagnostics. Codex additionally shows verified token activity and read-only reset-credit availability. Claude shows separately labelled local aggregate activity and aggregate model totals; it never attributes a model or reasoning effort to a session. Agents Deck never inspects threads or conversation contents.
+- Click a Claude or Codex ring or metric row to select its window; the five-hour window is the default. Click an Antigravity metric row to select it, and drag a group heading to reorder its quota groups. Each Mac remembers its chosen order locally.
+- Use the provider menu beside Refresh to show any nonempty combination of Claude, Codex, and Antigravity in the menu bar. Each percentage follows that provider card's selected window; Antigravity defaults to Gemini 4 Argon's weekly limit.
+- Click a provider card's logo or name to open its detail page. All providers show connection diagnostics. Codex additionally shows verified token activity and read-only reset-credit availability. Claude shows separately labelled local aggregate activity and aggregate model totals; it never attributes a model or reasoning effort to a session. Agents Deck never inspects threads or conversation contents.
 - Use the timer menu to choose a 1–3, 3–5, or 4–6 minute automatic refresh range. Display mode, cadence, selected windows, and panel size are restored after relaunch.
 - Hover the center percentage to see the selected window's name.
 - Hover any interactive control to see subtle motion and an action-oriented tooltip. Reduce Motion disables the transform without removing the tooltip or focus indication.
@@ -131,12 +138,12 @@ Application-owned data stays under:
 
 Release DMGs are built on an ephemeral GitHub-hosted macOS 26 runner using only Apple command-line tools. Each release includes a SHA-256 checksum and a GitHub artifact attestation. The workflow rejects local user paths, credential markers, internal development material, unexpected bundle contents, non-system dynamic libraries, and unexpected code-signing entitlements before publishing.
 
-Version 1.2.2, like every release since, is ad-hoc signed because the project has no paid Apple Developer membership. Version 1.0.0 was withdrawn and replaced by 1.0.1 after release-build hardening. A checksum and attestation help verify the published artifact, but they are not substitutes for Developer ID signing and Apple notarization. The release page and this README intentionally disclose that limitation.
+Version 1.3.0, like every release since, is ad-hoc signed because the project has no paid Apple Developer membership. Version 1.0.0 was withdrawn and replaced by 1.0.1 after release-build hardening. A checksum and attestation help verify the published artifact, but they are not substitutes for Developer ID signing and Apple notarization. The release page and this README intentionally disclose that limitation.
 
 ## Runtime design
 
 - One SwiftUI menu bar application; no Dock icon.
-- One cancellable coordinator scheduler with independently jittered Claude and Codex rate-limit deadlines, a 15-minute Codex token-activity fallback, Claude local-stats freshness evaluation, and maintenance.
+- One cancellable coordinator scheduler with independently jittered Claude, Codex, and Antigravity rate-limit deadlines, a 15-minute Codex token-activity fallback, Claude local-stats freshness evaluation, and maintenance.
 - One event-driven Claude bridge-directory observer.
 - One Codex app-server process, terminated when Agents Deck quits.
 - No helper daemon, launch agent, telemetry service, or permanently running tests.
@@ -156,7 +163,7 @@ sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
 
 **A CLI is not found**
 
-GUI apps do not always inherit your shell `PATH`. Open Agents Deck Settings and choose the exact `claude` or `codex` executable.
+GUI apps do not always inherit your shell `PATH`. Open Agents Deck Settings and choose the exact `claude`, `codex`, or `agy` executable.
 
 **Claude says Waiting for data**
 

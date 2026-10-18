@@ -38,15 +38,7 @@ enum UsageRingLayout {
     }
 
     static func defaultSelectedKind(in descriptors: [UsageRingDescriptor]) -> UsageWindowKind? {
-        descriptors.min { lhs, rhs in
-            if lhs.window.usedPercent != rhs.window.usedPercent {
-                return lhs.window.usedPercent < rhs.window.usedPercent
-            }
-            if lhs.window.durationMinutes != rhs.window.durationMinutes {
-                return lhs.window.durationMinutes < rhs.window.durationMinutes
-            }
-            return lhs.id.rawValue < rhs.id.rawValue
-        }?.id
+        descriptors.first(where: { $0.id == .fiveHour })?.id ?? descriptors.first?.id
     }
 
     static func reconciledSelection(
@@ -56,4 +48,43 @@ enum UsageRingLayout {
         if let selection, descriptors.contains(where: { $0.id == selection }) { return selection }
         return defaultSelectedKind(in: descriptors)
     }
+}
+
+struct AntigravityMetricID: Codable, Hashable, Identifiable, Sendable {
+    let group: AntigravityQuotaGroup
+    let kind: UsageWindowKind
+
+    var id: String { "\(group.rawValue).\(kind.rawValue)" }
+}
+
+struct AntigravityMetricDescriptor: Identifiable, Equatable, Sendable {
+    let id: AntigravityMetricID
+    let state: QuotaWindowState?
+    let colorIndex: Int
+
+    var window: UsageWindow? {
+        if case let .available(window) = state { return window }
+        return nil
+    }
+}
+
+enum AntigravityMetricLayout {
+    static let metrics: [AntigravityMetricID] = [
+        .init(group: .geminiModels, kind: .fiveHour),
+        .init(group: .geminiModels, kind: .sevenDay),
+        .init(group: .claudeAndGPTModels, kind: .fiveHour),
+        .init(group: .claudeAndGPTModels, kind: .sevenDay),
+        .init(group: .gemini4Argon, kind: .sevenDay)
+    ]
+
+    static func descriptors(for snapshot: UsageSnapshot) -> [AntigravityMetricDescriptor] {
+        metrics.enumerated().map { index, metric in
+            AntigravityMetricDescriptor(
+                id: metric,
+                state: snapshot.groupedWindows[metric.group]?[metric.kind],
+                colorIndex: index
+            )
+        }
+    }
+
 }

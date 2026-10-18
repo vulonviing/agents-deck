@@ -3,16 +3,26 @@ import SwiftUI
 struct ProviderCardView: View {
     let state: ProviderViewState
     let preferredKind: UsageWindowKind?
+    let selectedAntigravityMetric: AntigravityMetricID?
+    let antigravityGroupOrder: [AntigravityQuotaGroup]
     let onShowDetails: () -> Void
     let onSelectWindow: (UsageWindowKind) -> Void
+    let onSelectAntigravityMetric: (AntigravityMetricID) -> Void
+    let onMoveAntigravityGroup: (AntigravityQuotaGroup, AntigravityQuotaGroup) -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var antigravityDropTarget: AntigravityQuotaGroup?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: state.provider == .antigravity ? 12 : 8) {
             header
             if let snapshot = state.snapshot {
-                usage(snapshot)
-                metadata(snapshot)
+                if state.provider == .antigravity {
+                    antigravityUsage(snapshot)
+                    antigravityFreshness(snapshot)
+                } else {
+                    usage(snapshot)
+                    metadata(snapshot)
+                }
             } else {
                 emptyState
             }
@@ -118,6 +128,98 @@ struct ProviderCardView: View {
 
     private func select(_ kind: UsageWindowKind) {
         withAnimation(.easeInOut(duration: 0.18)) { onSelectWindow(kind) }
+    }
+
+    private func antigravityUsage(_ snapshot: UsageSnapshot) -> some View {
+        let descriptors = AntigravityMetricLayout.descriptors(for: snapshot)
+        let selectedMetric = selectedAntigravityMetric
+            ?? AntigravityMetricID(group: .gemini4Argon, kind: .sevenDay)
+        return VStack(alignment: .leading, spacing: 14) {
+            Divider().opacity(0.5)
+            ForEach(antigravityGroupOrder) { group in
+                VStack(alignment: .leading, spacing: 11) {
+                    HStack {
+                        Text(group.displayName)
+                            .font(DeckDesign.font(13, weight: .medium))
+                        Spacer(minLength: 8)
+                        if group != .gemini4Argon {
+                            Text("2 limits")
+                                .font(DeckDesign.font(10))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(Color.primary.opacity(0.08), in: Capsule())
+                        }
+                        Image(systemName: "line.3.horizontal")
+                            .font(DeckDesign.font(11))
+                            .foregroundStyle(.tertiary)
+                            .accessibilityHidden(true)
+                    }
+                    .contentShape(Rectangle())
+                    .draggable(group.rawValue)
+                    .help("Drag to reorder Antigravity groups")
+                    ForEach(descriptors.filter { $0.id.group == group }) { descriptor in
+                        AntigravityMetricRow(
+                            descriptor: descriptor,
+                            isSelected: descriptor.id == selectedMetric && descriptor.window != nil,
+                            onSelect: { selectAntigravityMetric(descriptor.id) }
+                        )
+                    }
+                }
+                .padding(.vertical, 2)
+                .background(
+                    antigravityDropTarget == group ? Color.accentColor.opacity(0.10) : .clear,
+                    in: RoundedRectangle(cornerRadius: 8)
+                )
+                .dropDestination(for: String.self) { items, _ in
+                    guard let value = items.first,
+                          let source = AntigravityQuotaGroup(rawValue: value),
+                          source != group
+                    else { return false }
+                    withAnimation(.easeInOut(duration: 0.18)) { onMoveAntigravityGroup(source, group) }
+                    return true
+                } isTargeted: { targeted in
+                    antigravityDropTarget = targeted ? group : nil
+                }
+                .accessibilityAction(named: "Move up") {
+                    guard let index = antigravityGroupOrder.firstIndex(of: group), index > 0 else { return }
+                    onMoveAntigravityGroup(group, antigravityGroupOrder[index - 1])
+                }
+                .accessibilityAction(named: "Move down") {
+                    guard let index = antigravityGroupOrder.firstIndex(of: group),
+                          index < antigravityGroupOrder.count - 1 else { return }
+                    onMoveAntigravityGroup(group, antigravityGroupOrder[index + 1])
+                }
+                if group != antigravityGroupOrder.last { Divider().opacity(0.5) }
+            }
+        }
+    }
+
+    private func selectAntigravityMetric(_ metric: AntigravityMetricID) {
+        withAnimation(.easeInOut(duration: 0.18)) { onSelectAntigravityMetric(metric) }
+    }
+
+    private func antigravityFreshness(_ snapshot: UsageSnapshot) -> some View {
+        let reachedCount = AntigravityMetricLayout.descriptors(for: snapshot)
+            .filter { ($0.window?.usedPercent ?? -1) >= 100 }.count
+        return VStack(alignment: .leading, spacing: 9) {
+            Divider().opacity(0.45)
+            HStack(spacing: 8) {
+                if state.connection == .connected && UsageAlgorithms.isFresh(snapshot) {
+                    freshness(snapshot)
+                } else {
+                    Label("Last sync \(Self.shortAge(since: snapshot.capturedAt)) ago", systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(DeckDesign.stale)
+                }
+                Spacer(minLength: 4)
+                if reachedCount > 0, state.connection == .connected, UsageAlgorithms.isFresh(snapshot) {
+                    Label("\(reachedCount) \(reachedCount == 1 ? "limit" : "limits") reached", systemImage: "exclamationmark.circle")
+                        .foregroundStyle(DeckDesign.windowCoral)
+                }
+            }
+        }
+        .font(DeckDesign.font(11, weight: .medium))
+        .lineLimit(1)
     }
 
     private func metadata(_ snapshot: UsageSnapshot) -> some View {
@@ -236,8 +338,10 @@ struct ProviderLogo: View {
     var body: some View {
         if provider == .claude {
             logoImage("ClaudeProviderMark", template: false)
-        } else {
+        } else if provider == .codex {
             logoImage("CodexProviderMark", template: true)
+        } else {
+            logoImage("AntigravityProviderMark", template: false)
         }
     }
 
@@ -376,5 +480,85 @@ private struct UsageMetricRow: View {
 
     private var accentColor: Color {
         descriptor.accent == .shortWindow ? DeckDesign.windowCoral : Color.primary.opacity(0.92)
+    }
+}
+
+private enum AntigravityBarColor {
+    static func forIndex(_ index: Int) -> Color {
+        switch index {
+        case 0: Color(red: 0.42, green: 0.72, blue: 0.91)
+        case 1: Color(red: 0.61, green: 0.77, blue: 0.42)
+        case 2: Color(red: 0.78, green: 0.56, blue: 0.79)
+        case 3: Color(red: 0.93, green: 0.59, blue: 0.43)
+        default: Color(red: 0.51, green: 0.57, blue: 0.91)
+        }
+    }
+}
+
+private struct AntigravityMetricRow: View {
+    let descriptor: AntigravityMetricDescriptor
+    let isSelected: Bool
+    let onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 8) {
+                    Text(descriptor.id.kind == .fiveHour ? "5-hour limit" : "Weekly limit")
+                        .foregroundStyle(isSelected || isReached ? color : .secondary)
+                    Spacer(minLength: 8)
+                    Text(valueLabel)
+                        .fontWeight(.medium)
+                        .monospacedDigit()
+                        .foregroundStyle(isSelected || isReached ? color : .primary)
+                }
+                GeometryReader { proxy in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(DeckDesign.ringTrack)
+                        if let window = descriptor.window, window.usedPercent > 0 {
+                            Capsule()
+                                .fill(color)
+                                .frame(width: proxy.size.width * min(window.usedPercent / 100, 1))
+                        }
+                    }
+                }
+                .frame(height: 4)
+                if let reset = descriptor.window?.resetsAt {
+                    Text("Resets \(reset, style: .relative)")
+                        .font(DeckDesign.font(10))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+            }
+            .font(DeckDesign.font(12))
+            .contentShape(Rectangle())
+            .overlay(alignment: .leading) {
+                if isSelected {
+                    Capsule()
+                        .fill(color)
+                        .frame(width: 2)
+                        .padding(.leading, -7)
+                }
+            }
+            .opacity(descriptor.window == nil ? 0.6 : 1)
+        }
+        .buttonStyle(.plain)
+        .disabled(descriptor.window == nil)
+        .deckInteractive(
+            help: "Select \(descriptor.id.group.displayName) \(descriptor.id.kind == .fiveHour ? "5-hour" : "weekly") usage",
+            style: .row
+        )
+        .accessibilityLabel("Select \(descriptor.id.group.displayName) \(descriptor.id.kind == .fiveHour ? "5-hour" : "weekly") usage")
+        .accessibilityValue(valueLabel)
+    }
+
+    private var color: Color { AntigravityBarColor.forIndex(descriptor.colorIndex) }
+
+    private var isReached: Bool { (descriptor.window?.usedPercent ?? -1) >= 100 }
+
+    private var valueLabel: String {
+        if let window = descriptor.window { return "\(Int(window.usedPercent.rounded()))%" }
+        if case .disabled = descriptor.state { return "Disabled" }
+        return "--"
     }
 }

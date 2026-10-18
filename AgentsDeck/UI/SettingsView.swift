@@ -40,6 +40,9 @@ struct SettingsView: View {
                             if provider == .codex {
                                 Button("Connect") { model.connect(.codex) }
                                     .deckInteractive(help: "Connect Codex through its official login flow")
+                            } else if provider == .antigravity {
+                                Button("Open CLI") { model.openAntigravityCLI() }
+                                    .deckInteractive(help: "Sign in through the Antigravity CLI in Terminal")
                             }
                         }
                     }

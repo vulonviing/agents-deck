@@ -6,6 +6,7 @@ actor UsageCoordinator {
     private let stateContinuation: AsyncStream<AppViewState>.Continuation
     private let claude: any ClaudeUsageProviding
     private let codex: any CodexUsageProviding
+    private let antigravity: any UsageProvider
     private let history: any HistoryStoring
     private let notifications: NotificationService
     private let diagnostics: DiagnosticsLogger
@@ -18,6 +19,7 @@ actor UsageCoordinator {
     private var started = false
     private var lastPruneDay: Date?
     private var lastCodexRefresh: Date?
+    private var lastAntigravityRefresh: Date?
     private var refreshCadence: RefreshCadence = .oneToThreeMinutes
     private var nextScheduledRefresh: [ProviderID: Date] = [:]
     private var nextMaintenanceAt: Date?
@@ -30,6 +32,7 @@ actor UsageCoordinator {
     init(
         claude: any ClaudeUsageProviding = ClaudeProvider(),
         codex: any CodexUsageProviding = CodexProvider(),
+        antigravity: any UsageProvider = AntigravityProvider(),
         history: any HistoryStoring = HistoryStoreFactory.makeLive(),
         notifications: NotificationService = NotificationService(),
         diagnostics: DiagnosticsLogger = DiagnosticsLogger()
@@ -39,6 +42,7 @@ actor UsageCoordinator {
         self.stateContinuation = pair.continuation
         self.claude = claude
         self.codex = codex
+        self.antigravity = antigravity
         self.history = history
         self.notifications = notifications
         self.diagnostics = diagnostics
@@ -57,13 +61,16 @@ actor UsageCoordinator {
         await hydrateLatestSnapshots()
         await publish()
 
-        eventTask = Task { [claude, codex] in
+        eventTask = Task { [claude, codex, antigravity] in
             await withTaskGroup(of: Void.self) { group in
                 group.addTask {
                     for await event in claude.events { await self.handle(event) }
                 }
                 group.addTask {
                     for await event in codex.events { await self.handle(event) }
+                }
+                group.addTask {
+                    for await event in antigravity.events { await self.handle(event) }
                 }
                 await group.waitForAll()
             }
@@ -72,6 +79,7 @@ actor UsageCoordinator {
         await withTaskGroup(of: Void.self) { group in
             group.addTask { await self.claude.start() }
             group.addTask { await self.codex.start() }
+            group.addTask { await self.antigravity.start() }
         }
         await maintenance()
         await withTaskGroup(of: Void.self) { group in
@@ -101,6 +109,7 @@ actor UsageCoordinator {
         eventTask = nil
         await claude.stop()
         await codex.stop()
+        await antigravity.stop()
         await diagnostics.log(.info, category: "app", event: "coordinator_stopped")
     }
 
@@ -113,6 +122,11 @@ actor UsageCoordinator {
             if lastCodexRefresh.map({ now.timeIntervalSince($0) >= 10 }) ?? true {
                 group.addTask {
                     await self.requestRefresh(.codex, reason: .popoverOpened, policy: .coalesce)
+                }
+            }
+            if lastAntigravityRefresh.map({ now.timeIntervalSince($0) >= 10 }) ?? true {
+                group.addTask {
+                    await self.requestRefresh(.antigravity, reason: .popoverOpened, policy: .coalesce)
                 }
             }
         }
@@ -160,6 +174,9 @@ actor UsageCoordinator {
         case .codex:
             await codex.stop()
             await codex.start()
+        case .antigravity:
+            await antigravity.stop()
+            await antigravity.start()
         }
     }
 
@@ -353,6 +370,7 @@ actor UsageCoordinator {
             ? .connected
             : .stale
         if snapshot.provider == .codex { lastCodexRefresh = snapshot.capturedAt }
+        if snapshot.provider == .antigravity { lastAntigravityRefresh = snapshot.capturedAt }
         if persist { try? await history.record(snapshot) }
         if evaluateNotifications { await notifications.evaluate(snapshot, receipts: history) }
         await diagnostics.log(.info, category: "provider", event: "snapshot_verified", provider: snapshot.provider)
@@ -516,6 +534,8 @@ actor UsageCoordinator {
             task = Task { [claude] in try await claude.refresh(reason: reason) }
         case .codex:
             task = Task { [codex] in try await codex.refresh(reason: reason) }
+        case .antigravity:
+            task = Task { [antigravity] in try await antigravity.refresh(reason: reason) }
         }
         providerRefreshTasks[provider] = task
         let result = await task.result
@@ -542,7 +562,8 @@ actor UsageCoordinator {
                 reason: reason
             )
             state.providers[provider]?.connection = connection
-            await logRefreshFailure(provider, reason: reason, code: error.code, startedAt: startedAt)
+            let exitStatus: Int32? = if case let .processFailed(status) = error { status } else { nil }
+            await logRefreshFailure(provider, reason: reason, code: error.code, startedAt: startedAt, exitStatus: exitStatus)
         case .failure(is CancellationError):
             await diagnostics.log(
                 .info,
@@ -571,6 +592,10 @@ actor UsageCoordinator {
         now: Date = Date()
     ) -> ProviderConnectionState {
         let snapshot = state.providers[provider]?.snapshot
+        if provider == .antigravity {
+            if code == .authenticationRequired { return .needsLogin }
+            if code == .executableMissing { return .unavailable }
+        }
         if reason != .manual, let snapshot {
             return UsageAlgorithms.isFresh(snapshot, now: now) ? .connected : .stale
         }
@@ -581,14 +606,19 @@ actor UsageCoordinator {
         _ provider: ProviderID,
         reason: ProviderRefreshReason,
         code: ProviderErrorCode,
-        startedAt: Date
+        startedAt: Date,
+        exitStatus: Int32? = nil
     ) async {
+        var metadata: [String: DiagnosticValue] = [
+            "duration_seconds": .double(Date().timeIntervalSince(startedAt))
+        ]
+        if let exitStatus { metadata["exit_status"] = .integer(Int(exitStatus)) }
         await diagnostics.log(
             .warning,
             category: "refresh",
             event: "failed_\(reason.logValue)_\(code.rawValue)",
             provider: provider,
-            metadata: ["duration_seconds": .double(Date().timeIntervalSince(startedAt))]
+            metadata: metadata
         )
     }
 }

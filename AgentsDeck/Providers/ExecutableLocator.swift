@@ -13,7 +13,7 @@ struct ExecutableLocator {
     }
 
     func locate(_ provider: ProviderID, customPath: String? = nil) -> URL? {
-        let executableName = provider.rawValue
+        let executableName = provider == .antigravity ? "agy" : provider.rawValue
         var candidates: [URL] = []
         if let customPath, !customPath.isEmpty {
             candidates.append(URL(filePath: customPath))
@@ -30,9 +30,10 @@ struct ExecutableLocator {
     }
 
     func isExecutableFile(_ url: URL) -> Bool {
-        guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]),
-              values.isRegularFile == true || values.isSymbolicLink == true
+        let resolved = url.resolvingSymlinksInPath()
+        guard let values = try? resolved.resourceValues(forKeys: [.isRegularFileKey]),
+              values.isRegularFile == true
         else { return false }
-        return fileManager.isExecutableFile(atPath: url.path)
+        return fileManager.isExecutableFile(atPath: resolved.path)
     }
 }
