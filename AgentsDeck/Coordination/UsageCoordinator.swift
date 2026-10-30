@@ -27,7 +27,6 @@ actor UsageCoordinator {
 
     private static let codexActivityInterval: TimeInterval = 15 * 60
     private static let codexActivityFreshness: TimeInterval = 30 * 60
-    private static let claudeStatsFreshness: TimeInterval = 15 * 60
 
     init(
         claude: any ClaudeUsageProviding = ClaudeProvider(),
@@ -225,6 +224,8 @@ actor UsageCoordinator {
             )
         case let .snapshot(snapshot):
             await acceptSnapshot(snapshot, persist: true, evaluateNotifications: true)
+        case let .supplement(supplement):
+            await acceptSupplement(supplement, persist: true)
         case let .version(provider, version):
             state.providers[provider]?.executableVersion = version
             await diagnostics.log(.info, category: "provider", event: "version_detected", provider: provider)
@@ -257,8 +258,7 @@ actor UsageCoordinator {
         }
         if let stats = try? await history.latestClaudeStats() {
             state.providers[.claude]?.claudeStats = stats
-            state.providers[.claude]?.claudeStatsState = now.timeIntervalSince(stats.capturedAt)
-                <= Self.claudeStatsFreshness ? .available : .stale
+            state.providers[.claude]?.claudeStatsState = stats.isFresh(at: now) ? .available : .stale
         }
     }
 
@@ -289,7 +289,7 @@ actor UsageCoordinator {
             }
             if let accepted = state.providers[.claude]?.claudeStats {
                 state.providers[.claude]?.claudeStatsState =
-                    now.timeIntervalSince(accepted.capturedAt) <= Self.claudeStatsFreshness
+                    accepted.isFresh(at: now)
                     ? .available
                     : .stale
             }
@@ -403,7 +403,7 @@ actor UsageCoordinator {
         }
         if state.providers[.claude]?.claudeStatsState == .available,
            let stats = state.providers[.claude]?.claudeStats,
-           now.timeIntervalSince(stats.capturedAt) > Self.claudeStatsFreshness {
+           !stats.isFresh(at: now) {
             state.providers[.claude]?.claudeStatsState = .stale
         }
 

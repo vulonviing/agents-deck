@@ -3,6 +3,7 @@ import Foundation
 
 protocol ClaudeUsageCommandProbing: Sendable {
     func fetch(executable: URL) async throws -> UsageSnapshot
+    func refreshStats(executable: URL) async throws
     func stop() async
 }
 
@@ -36,6 +37,26 @@ actor ClaudeUsageCommandProbe: ClaudeUsageCommandProbing {
         } catch {
             return try await ptyFetch(executable: executable)
         }
+    }
+
+    /// Ask Claude's built-in local command to maintain its own aggregate cache.
+    func refreshStats(executable: URL) async throws {
+        try prepareWorkingDirectory()
+        let sessionID = UUID()
+        defer { cleanupProbeArtifact(sessionID: sessionID) }
+        let controller = ClaudeProbeProcessController()
+        activePTYProcess = controller
+        defer { activePTYProcess = nil }
+        _ = try await Self.captureUsingSystemPTY(
+            executable: executable,
+            arguments: launchArguments(sessionID: sessionID, command: nil),
+            environment: launchEnvironment(),
+            currentDirectory: paths.claudeProbeDirectory,
+            controller: controller,
+            outputLimit: Self.outputLimit,
+            command: "/stats",
+            waitSeconds: 25
+        )
     }
 
     func stop() async {
@@ -152,7 +173,9 @@ actor ClaudeUsageCommandProbe: ClaudeUsageCommandProbing {
         environment: [String: String],
         currentDirectory: URL,
         controller: ClaudeProbeProcessController,
-        outputLimit: Int
+        outputLimit: Int,
+        command: String = "/usage",
+        waitSeconds: Int = 6
     ) async throws -> Data {
         let process = Process()
         let inputPipe = Pipe()
@@ -198,8 +221,8 @@ actor ClaudeUsageCommandProbe: ClaudeUsageCommandProbing {
                     Task {
                         do {
                             try await Task.sleep(for: .seconds(2))
-                            input.write("/usage\r")
-                            try await Task.sleep(for: .seconds(6))
+                            input.write("\(command)\r")
+                            try await Task.sleep(for: .seconds(waitSeconds))
                             input.write("\u{1B}/exit\r")
                             try await Task.sleep(for: .milliseconds(400))
                         } catch {}

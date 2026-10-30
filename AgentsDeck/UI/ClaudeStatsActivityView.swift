@@ -64,7 +64,9 @@ struct ClaudeStatsActivityView: View {
 
     private var subtitle: String {
         guard let stats else { return "Official Claude Code local stats cache" }
-        return "Updated \(stats.capturedAt.formatted(date: .abbreviated, time: .shortened))"
+        let checked = stats.capturedAt.formatted(date: .abbreviated, time: .shortened)
+        guard let through = stats.computedThrough?.date() else { return "Coverage unknown · Checked \(checked)" }
+        return "Through \(through.formatted(date: .abbreviated, time: .omitted)) · Checked \(checked)"
     }
 
     @ViewBuilder

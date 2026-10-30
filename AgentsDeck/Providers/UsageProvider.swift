@@ -23,6 +23,7 @@ struct ProviderRefreshResult: Equatable, Sendable {
 enum UsageProviderEvent: Sendable {
     case connection(ProviderID, ProviderConnectionState)
     case snapshot(UsageSnapshot)
+    case supplement(ProviderSupplement)
     case version(ProviderID, String)
     case restartCount(ProviderID, Int)
     case refreshRequested(ProviderID)
