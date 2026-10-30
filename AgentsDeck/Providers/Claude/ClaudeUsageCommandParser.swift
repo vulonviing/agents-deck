@@ -131,7 +131,7 @@ enum ClaudeUsageCommandParser {
     private static func resetDate(in section: String, capturedAt: Date) -> Date? {
         guard let resetText = (firstCapture(
             in: section,
-            pattern: #"(?i)resets?\s*(?:at|on)?\s*[:·\-]?\s*([^\n]{1,120})"#
+            pattern: #"(?i)resets?\s*(?:at|on|in)?\s*[:·\-]?\s*([^\n]{1,120})"#
         ))?.trimmingCharacters(in: .whitespacesAndNewlines)
         else { return nil }
 
@@ -157,59 +157,145 @@ enum ClaudeUsageCommandParser {
             return validatedReset(isoDate, capturedAt: capturedAt)
         }
 
-        let displayTimeZonePattern = #"\s*\([^\)\n]{1,64}\)\s*$"#
-        let localResetText: String
-        if let expression = try? NSRegularExpression(pattern: displayTimeZonePattern) {
-            localResetText = expression.stringByReplacingMatches(
-                in: resetText,
-                range: NSRange(resetText.startIndex..., in: resetText),
-                withTemplate: ""
-            )
-        } else {
-            localResetText = resetText
+        let cleanCandidate = resetText
+            .components(separatedBy: "·")[0]
+            .components(separatedBy: "|")[0]
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        var targetTimeZone = TimeZone.current
+        let tzPattern = #"\(([A-Za-z0-9_/+\-]+)\)"#
+        if let tzMatch = firstCapture(in: cleanCandidate, pattern: tzPattern),
+           let parsedTz = TimeZone(identifier: tzMatch) ?? TimeZone(abbreviation: tzMatch) {
+            targetTimeZone = parsedTz
         }
 
-        if let timeToken = firstCapture(
-            in: localResetText,
-            pattern: #"(?i)\b((?:(?:[01]?\d|2[0-3]):[0-5]\d\s*(?:am|pm)?|(?:1[0-2]|0?[1-9])\s*(?:am|pm)))\b"#
-        ), let timeOnlyReset = timeOnlyResetDate(from: timeToken, capturedAt: capturedAt) {
-            return timeOnlyReset
-        }
+        let textWithoutTz = cleanCandidate
+            .replacingOccurrences(of: #"\s*\([^\)]+\)\s*"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
 
-        let formats = [
+        let monthDayFormats = [
+            // With 'at'
+            "MMM d, yyyy 'at' ha",
+            "MMM d, yyyy 'at' h:mma",
             "MMM d, yyyy 'at' h:mm a",
+            "MMM d, yyyy 'at' h a",
+            "MMM d, yyyy 'at' HH:mm",
+            "MMM d yyyy 'at' ha",
+            "MMM d yyyy 'at' h:mma",
             "MMM d yyyy 'at' h:mm a",
+            "MMM d yyyy 'at' h a",
+            "MMM d yyyy 'at' HH:mm",
+            "MMM d 'at' ha",
+            "MMM d 'at' h:mma",
             "MMM d 'at' h:mm a",
+            "MMM d 'at' h a",
+            "MMM d 'at' HH:mm",
+            "MMMM d, yyyy 'at' ha",
+            "MMMM d, yyyy 'at' h:mma",
+            "MMMM d, yyyy 'at' h:mm a",
+            "MMMM d, yyyy 'at' h a",
+            "MMMM d, yyyy 'at' HH:mm",
+            "MMMM d 'at' ha",
+            "MMMM d 'at' h:mma",
+            "MMMM d 'at' h:mm a",
+            "MMMM d 'at' h a",
+            "MMMM d 'at' HH:mm",
+            // Without 'at'
+            "MMM d, yyyy ha",
+            "MMM d, yyyy h:mma",
             "MMM d, yyyy h:mm a",
+            "MMM d, yyyy h a",
+            "MMM d, yyyy HH:mm",
+            "MMM d yyyy ha",
+            "MMM d yyyy h:mma",
+            "MMM d yyyy h:mm a",
+            "MMM d yyyy h a",
+            "MMM d yyyy HH:mm",
+            "MMM d ha",
+            "MMM d h:mma",
             "MMM d h:mm a",
+            "MMM d h a",
+            "MMM d HH:mm",
+            "MMMM d, yyyy ha",
+            "MMMM d, yyyy h:mma",
+            "MMMM d, yyyy h:mm a",
+            "MMMM d, yyyy h a",
+            "MMMM d, yyyy HH:mm",
+            "MMMM d ha",
+            "MMMM d h:mma",
+            "MMMM d h:mm a",
+            "MMMM d h a",
+            "MMMM d HH:mm",
+            // Day first
+            "d MMM, yyyy 'at' ha",
+            "d MMM yyyy 'at' ha",
+            "d MMM 'at' ha",
+            "d MMM 'at' h:mma",
+            "d MMM 'at' h:mm a",
+            "d MMM 'at' h a",
+            "d MMM 'at' HH:mm",
+            "d MMM ha",
+            "d MMM h:mma",
+            "d MMM h:mm a",
+            "d MMM h a",
+            "d MMM HH:mm",
+            "d MMMM 'at' ha",
+            "d MMMM 'at' h:mma",
+            "d MMMM 'at' h:mm a",
+            "d MMMM 'at' HH:mm",
         ]
-        for format in formats {
+
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = targetTimeZone
+        let defaultMidnight = calendar.startOfDay(for: capturedAt)
+
+        for format in monthDayFormats {
             let formatter = DateFormatter()
             formatter.locale = Locale(identifier: "en_US_POSIX")
-            formatter.timeZone = .current
+            formatter.timeZone = targetTimeZone
             formatter.dateFormat = format
-            formatter.defaultDate = capturedAt
-            guard var date = formatter.date(from: resetText) else { continue }
+            formatter.defaultDate = defaultMidnight
+            guard var date = formatter.date(from: textWithoutTz) else { continue }
             if !format.contains("yyyy"), date < capturedAt.addingTimeInterval(-24 * 60 * 60),
-               let nextYear = Calendar.current.date(byAdding: .year, value: 1, to: date) {
+               let nextYear = calendar.date(byAdding: .year, value: 1, to: date) {
                 date = nextYear
             }
             if let validated = validatedReset(date, capturedAt: capturedAt) { return validated }
         }
+
+        let monthNames = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
+        let containsMonth = monthNames.contains { textWithoutTz.localizedCaseInsensitiveContains($0) }
+        guard !containsMonth else { return nil }
+
+        if let timeOnlyReset = timeOnlyResetDate(from: textWithoutTz, timeZone: targetTimeZone, capturedAt: capturedAt) {
+            return timeOnlyReset
+        }
+
+        if let timeToken = firstCapture(
+            in: textWithoutTz,
+            pattern: #"(?i)\b((?:(?:[01]?\d|2[0-3]):[0-5]\d\s*(?:am|pm)?|(?:1[0-2]|0?[1-9])\s*(?:am|pm)))\b"#
+        ), let timeOnlyReset = timeOnlyResetDate(from: timeToken, timeZone: targetTimeZone, capturedAt: capturedAt) {
+            return timeOnlyReset
+        }
+
         return nil
     }
 
-    private static func timeOnlyResetDate(from text: String, capturedAt: Date) -> Date? {
-        let formats = ["h:mma", "h:mm a", "ha", "h a", "HH:mm"]
+    private static func timeOnlyResetDate(
+        from text: String,
+        timeZone: TimeZone = .current,
+        capturedAt: Date
+    ) -> Date? {
+        let formats = ["h:mma", "h:mm a", "ha", "h a", "HH:mm", "H:mm"]
         var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = .current
+        calendar.timeZone = timeZone
 
         for format in formats {
             let formatter = DateFormatter()
             formatter.locale = Locale(identifier: "en_US_POSIX")
             formatter.timeZone = calendar.timeZone
             formatter.dateFormat = format
-            formatter.defaultDate = capturedAt
+            formatter.defaultDate = calendar.startOfDay(for: capturedAt)
             formatter.isLenient = false
             guard let parsed = formatter.date(from: text),
                   let candidateToday = calendar.date(

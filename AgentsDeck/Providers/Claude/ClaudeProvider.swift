@@ -17,6 +17,7 @@ actor ClaudeProvider: ClaudeUsageProviding {
     private var directorySource: (any DispatchSourceFileSystemObject)?
     private var latestSnapshotAt: Date?
     private var refreshInFlight = false
+    private var lastStatsRefreshAttempt: Date?
     private var verifiedResetCache = ClaudeVerifiedResetCache()
 
     init(
@@ -67,21 +68,46 @@ actor ClaudeProvider: ClaudeUsageProviding {
         guard !refreshInFlight else { throw ProviderBoundaryError.retryPaused }
         refreshInFlight = true
         defer { refreshInFlight = false }
+        // Publish local aggregates independently: a quota/network failure must not hide them.
+        var statsRefresh = readStats()
+        continuation.yield(.supplement(.claude(statsRefresh)))
+        let now = Date()
+        let needsRefresh: Bool
+        if case let .available(stats) = statsRefresh {
+            needsRefresh = !stats.isFresh(at: now)
+        } else {
+            needsRefresh = true
+        }
+        if needsRefresh && now.timeIntervalSince(lastStatsRefreshAttempt ?? .distantPast) >= 15 * 60 {
+            lastStatsRefreshAttempt = now
+            do {
+                try await usageProbe.refreshStats(executable: executable)
+                try Task.checkCancellation()
+                statsRefresh = readStats()
+                continuation.yield(.supplement(.claude(statsRefresh)))
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                // Local cache maintenance must never block the independent quota probe.
+            }
+        }
         let probedSnapshot = try await usageProbe.fetch(executable: executable)
         try Task.checkCancellation()
         let snapshot = verifiedResetCache.merge(probedSnapshot)
         latestSnapshotAt = max(latestSnapshotAt ?? .distantPast, snapshot.capturedAt)
-        let statsRefresh: ClaudeStatsRefresh
+        return ProviderRefreshResult(snapshot: snapshot)
+    }
+
+    private func readStats() -> ClaudeStatsRefresh {
         do {
-            statsRefresh = .available(try statsReader.read(capturedAt: snapshot.capturedAt))
+            return .available(try statsReader.read(capturedAt: Date()))
         } catch ClaudeStatsCacheError.unavailable {
-            statsRefresh = .unavailable
+            return .unavailable
         } catch let error as ClaudeStatsCacheError {
-            statsRefresh = .failed(error.providerCode)
+            return .failed(error.providerCode)
         } catch {
-            statsRefresh = .failed(.unknown)
+            return .failed(.unknown)
         }
-        return ProviderRefreshResult(snapshot: snapshot, supplement: .claude(statsRefresh))
     }
 
     func installBridge() async throws {

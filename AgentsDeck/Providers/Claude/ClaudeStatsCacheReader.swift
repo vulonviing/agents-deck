@@ -224,9 +224,8 @@ enum ClaudeStatsCacheParser {
             let day = calendar.startOfDay(for: date)
             return day >= earliestRetained && day <= today
         }
-        let summaryEnd = computedThrough?.date(in: calendar.timeZone).map {
-            min(calendar.startOfDay(for: $0), today)
-        } ?? today
+        // Relative periods must stay relative to today, even when the CLI cache is old.
+        let summaryEnd = today
 
         let allTimeSummary = try summary(
             buckets: allBuckets,

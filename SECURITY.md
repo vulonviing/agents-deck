@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Security fixes are provided only for the latest `1.x` release, currently `1.3.0`. Version `1.0.0` was withdrawn and replaced by `1.0.1` after release-build hardening.
+Security fixes are provided only for the latest `1.x` release, currently `1.3.1`. Version `1.0.0` was withdrawn and replaced by `1.0.1` after release-build hardening.
 
 ## Reporting a vulnerability
 
@@ -15,8 +15,8 @@ Include the smallest reproducible description possible. Replace account identifi
 The free DMG is ad-hoc signed and is not Apple-notarized. Verify both the SHA-256 checksum and GitHub artifact attestation published with the release:
 
 ```sh
-shasum -a 256 -c Agents-Deck-1.3.0.sha256
-gh attestation verify Agents-Deck-1.3.0.dmg --repo vulonviing/agents-deck
+shasum -a 256 -c Agents-Deck-1.3.1.sha256
+gh attestation verify Agents-Deck-1.3.1.dmg --repo vulonviing/agents-deck
 ```
 
 Then follow the per-app **Open Anyway** flow described in the README. Never disable Gatekeeper globally to install Agents Deck.

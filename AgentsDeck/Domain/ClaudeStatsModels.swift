@@ -69,6 +69,15 @@ struct ClaudeStatsSnapshot: Codable, Equatable, Sendable {
     let longestSessionSeconds: Int64?
     let peakHour: Int?
 
+    /// Cache coverage and observation freshness are independent.
+    func isFresh(at now: Date, maximumAge: TimeInterval = 15 * 60, calendar: Calendar = .current) -> Bool {
+        guard now.timeIntervalSince(capturedAt) <= maximumAge,
+              let covered = computedThrough?.date(in: calendar.timeZone),
+              let yesterday = calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: now))
+        else { return false }
+        return calendar.startOfDay(for: covered) >= yesterday
+    }
+
     func summary(for period: ClaudeStatsPeriod) -> ClaudeStatsPeriodSummary {
         switch period {
         case .allTime: allTimeSummary
