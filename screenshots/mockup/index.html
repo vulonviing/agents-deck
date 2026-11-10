@@ -1,0 +1,75 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Agents Deck mockup</title>
+<style>
+:root{--coral:#F0997B;--green:#A6C97A;--blue:#6BB8E8;--indigo:#838FE8;--orange:#ED9670;--purple:#C78FC9;
+--t:rgba(255,255,255,.92);--s:rgba(255,255,255,.55);--q:rgba(255,255,255,.30)}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:transparent;width:600px;height:1100px;font-family:-apple-system,"SF Pro Text","Helvetica Neue",sans-serif;color:var(--t);-webkit-font-smoothing:antialiased}
+.win{position:absolute;inset:0;border-radius:16px;overflow:hidden;border:1px solid rgba(255,255,255,.14);
+background:radial-gradient(900px 500px at 10% 0%,#2a3b5c 0%,transparent 60%),radial-gradient(700px 600px at 100% 100%,#3a2a52 0%,transparent 60%),linear-gradient(160deg,#171b26,#0d0f15)}
+.bar{height:30px;background:rgba(20,22,30,.55);backdrop-filter:blur(20px);display:flex;align-items:center;padding:0 14px;gap:12px;font-size:12.5px;border-bottom:1px solid rgba(255,255,255,.06)}
+.lights{display:flex;gap:8px;margin-right:6px}.lights i{width:12px;height:12px;border-radius:50%}
+.bar b{font-weight:600}.sp{flex:1}.bar .m{display:flex;align-items:center;gap:4px;font-weight:500}
+.pop{position:absolute;top:40px;left:80px;width:430px;border-radius:26px;padding:16px;background:rgba(34,36,44,.86);
+border:.5px solid rgba(255,255,255,.18);box-shadow:0 30px 70px rgba(0,0,0,.55),0 0 0 .5px rgba(0,0,0,.6)}
+.hd{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.hd h1{font-size:19px;font-weight:600;letter-spacing:-.2px}.hd p{font-size:11.5px;color:var(--s);margin-top:2px}
+.hd>div:first-child{flex:1}
+.btn{height:26px;border-radius:9px;background:rgba(255,255,255,.07);display:flex;align-items:center;gap:6px;padding:0 9px;color:var(--t)}
+.card{border-radius:18px;background:rgba(255,255,255,.045);border:.5px solid rgba(255,255,255,.08);padding:14px;margin-bottom:12px}
+.card:last-child{margin-bottom:0}
+.ch{display:flex;align-items:center;gap:10px}
+.logo{width:34px;height:34px;border-radius:9px;background:rgba(255,255,255,.06);display:grid;place-items:center}
+.ch .n{font-size:16px;font-weight:500}.ch .sub{font-size:10px;color:var(--s);margin-top:1px}.ch .nm{flex:1}
+.pill{font-size:10px;font-weight:500;color:var(--green);background:rgba(166,201,122,.14);border-radius:99px;padding:4px 9px;display:flex;gap:5px;align-items:center}
+.use{display:flex;align-items:center;gap:14px;margin-top:8px}
+.rows{flex:1;display:flex;flex-direction:column;gap:10px}
+.row .l{display:flex;align-items:center;font-size:12px;font-weight:500;gap:6px}.row .l .d{width:6px;height:6px;border-radius:50%}
+.row .l .r{color:var(--q);font-weight:400;flex:1}.row .l .v{font-weight:600}
+.bar2{height:4px;border-radius:3px;background:rgba(255,255,255,.12);margin-top:6px;overflow:hidden}.bar2 i{display:block;height:100%;border-radius:3px}
+.hr{height:.5px;background:rgba(255,255,255,.12);margin:8px 0 6px}
+.meta{display:flex;font-size:11px;font-weight:500;color:var(--s);align-items:center;gap:5px}.meta .sp{flex:1}
+.meta b{color:var(--t);font-weight:500}.meta u{text-decoration:none;color:var(--q)}
+.g{padding:8px 0 2px}.g .t{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;margin-bottom:9px}.g .t .sp{flex:1}
+.chip{font-size:10px;color:var(--s);background:rgba(255,255,255,.08);border-radius:99px;padding:3px 8px;font-weight:400}
+.mr{margin-bottom:9px;font-size:13px}.mr .l{display:flex;justify-content:space-between}.mr .rs{font-size:10.5px;color:var(--q);margin-top:6px}
+.mr.sel{border-left:2px solid var(--indigo);padding-left:8px;margin-left:-8px}
+.mr .bar2{height:4px}
+.grip{width:11px;height:7px;border-top:1px solid var(--q);border-bottom:1px solid var(--q);position:relative}.grip:after{content:"";position:absolute;left:0;right:0;top:2.5px;border-top:1px solid var(--q)}
+</style></head><body><div class="win">
+<div class="bar"><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div>
+<span></span><div class="sp"></div>
+<span class="m" id="mb"></span><span style="margin-left:6px">Mon 9 Nov&nbsp; 14:32</span></div>
+<div class="pop" id="pop"></div></div>
+<script>
+const $=s=>s;const ico={
+claude:(c,s)=>`<svg width="${s}" height="${s}" viewBox="-10 -10 20 20" stroke="${c}" stroke-width="1.9" stroke-linecap="round">${[...Array(10)].map((_,i)=>`<line x1="0" y1="0" x2="0" y2="-${i%2?7.6:9}" transform="rotate(${i*36})"/>`).join('')}</svg>`,
+codex:(c,s)=>`<svg width="${s}" height="${s}" viewBox="-10 -10 20 20" fill="none" stroke="${c}" stroke-width="1.4">${[0,60,120].map(a=>`<rect x="-3.6" y="-8.6" width="7.2" height="12" rx="3.6" transform="rotate(${a})"/>`).join('')}${[0,60,120].map(a=>`<rect x="-3.6" y="-3.4" width="7.2" height="12" rx="3.6" transform="rotate(${a})"/>`).join('')}</svg>`,
+anti:(s,c)=>`<svg width="${s}" height="${s}" viewBox="0 0 20 20"><defs><linearGradient id="ag${s}${c}" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#4fc3f7"/><stop offset=".5" stop-color="#e0689a"/><stop offset="1" stop-color="#f6a93b"/></linearGradient></defs><path d="M10 1.5 18.5 18.5h-4.2L10 9.2 5.7 18.5H1.5z" fill="${c||'url(#ag'+s+'x)'}"/></svg>`.replace('x)',c?')':'x)')};
+const antiG=s=>`<svg width="${s}" height="${s}" viewBox="0 0 20 20"><defs><linearGradient id="ag" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#4fc3f7"/><stop offset=".5" stop-color="#e0689a"/><stop offset="1" stop-color="#f6a93b"/></linearGradient></defs><path d="M10 1.5 18.5 18.5h-4.2L10 9.2 5.7 18.5H1.5z" fill="url(#ag)"/></svg>`;
+const W='#fff';
+document.getElementById('mb').innerHTML=`${ico.claude(W,15)}<span>4%</span>&nbsp;${ico.codex(W,15)}<span>4%</span>&nbsp;${antiG(14).replace('url(#ag)','#fff')}<span>5%</span>`;
+function ring(outer,inner,ic,oc,txt){const R=(r,p,c)=>{const C=2*Math.PI*r;return `<circle r="${r}" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="5"/><circle r="${r}" fill="none" stroke="${c}" stroke-width="5" stroke-linecap="round" stroke-dasharray="${Math.max(C*p/100,0.1)} ${C}" transform="rotate(-90)"/>`};
+return `<svg width="96" height="96" viewBox="-48 -48 96 96">${R(44,outer,oc)}${R(34,inner,ic)}<text y="6" text-anchor="middle" font-size="19" font-weight="600" fill="#fff" font-family="-apple-system,sans-serif">${txt}</text></svg>`}
+const clock=`<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="8" cy="9" r="5.5"/><path d="M8 6.5V9l1.8 1M6.5 1.5h3"/></svg>`;
+const chev=`<svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2 3.5 5 6.5 8 3.5"/></svg>`;
+const refresh=`<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M13 8a5 5 0 1 1-1.6-3.7M13 2.5v3h-3"/></svg>`;
+const check=`<svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M1.8 5.4 4 7.5 8.3 2.6"/></svg>`;
+const upd=t=>`<span style="display:flex;gap:6px;align-items:center;color:var(--s)">${refresh} Updated ${t}</span>`;
+const pill=`<div class="pill">${check} Connected</div>`;
+const head=(lg,n)=>`<div class="ch"><div class="logo">${lg}</div><div class="nm"><div class="n">${n}</div><div class="sub">CLI session</div></div>${pill}</div>`;
+const row=(c,l,r,v,p,bc)=>`<div class="row"><div class="l"><span class="d" style="background:${c}"></span>${l}<span class="r">· ${r}</span><span class="v">${v}%</span></div><div class="bar2"><i style="width:${p}%;background:${bc||c}"></i></div></div>`;
+const std=(lg,n,five,seven,fr,upt,rt1,rt2)=>`<div class="card">${head(lg,n)}<div class="use">${ring(seven,five,'#F0997B','rgba(255,255,255,.55)',five+'%')}<div class="rows">${row('#F0997B','5-hour limit',rt1,five,five)}${row('rgba(255,255,255,.55)','7-day limit',rt2,seven,seven)}</div></div><div class="hr"></div><div class="meta">${upd(upt)}<span class="sp"></span><span>Session cost</span><u>·</u><span style="color:var(--q)">Not provided</span></div></div>`;
+const mr=(l,v,p,rs,c,sel,dis)=>`<div class="mr ${sel?'sel':''}"><div class="l" style="color:${dis?'var(--q)':c||'var(--t)'}"><span>${l}</span><span style="${dis?'color:var(--s)':''}">${v}</span></div><div class="bar2" style="margin-top:8px"><i style="width:${p}%;background:${c||'rgba(255,255,255,.55)'}"></i></div>${rs?`<div class="rs">${rs}</div>`:''}</div>`;
+const grp=(n,chip,body)=>`<div class="g"><div class="t"><span>${n}</span><span class="sp"></span>${chip?'<span class="chip">2 limits</span>':''}<span class="grip"></span></div>${body}</div>`;
+const IN='#838FE8',CO='#F0997B';
+document.getElementById('pop').innerHTML=`
+<div class="hd"><div><h1>Agents Deck</h1><p>Local usage, quietly monitored.</p></div>
+<div class="btn">${clock}${chev}</div><div class="btn">${ico.claude(W,13)}${ico.codex(W,13)}${antiG(13).replace('url(#ag)','#fff')}${chev}</div><div class="btn" style="width:34px;justify-content:center;height:34px">${refresh}</div></div>
+${std(ico.claude('#D97757',20),'Claude',4,20,0,'10 min, 13 sec','Resets 4 hr, 38 min','Resets 5 days, 21 hr')}
+${std(ico.codex(W,20),'Codex',4,62,0,'10 min, 14 sec','Resets 4 hr, 44 min','Resets 4 days, 5 hr')}
+<div class="card">${head(antiG(20),'Antigravity')}<div class="hr" style="margin:12px 0 2px"></div>
+${grp('Gemini 4 Argon',0,mr('Weekly limit','5%',5,'Resets 6 days, 12 hr',IN,true))}<div class="hr"></div>
+${grp('Gemini Models',1,mr('5-hour limit','0%',0,'Resets 4 hr, 59 min')+mr('Weekly limit','0%',0,'Resets 6 days, 23 hr'))}<div class="hr"></div>
+${grp('Claude and GPT Models',1,mr('5-hour limit','Disabled',0,'',null,0,1)+mr('Weekly limit','100%',100,'Resets 4 days, 3 hr',CO))}
+<div class="hr"></div><div class="meta">${upd('21 sec')}<span class="sp"></span><span style="color:var(--orange);display:flex;gap:5px;align-items:center"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="6" cy="6" r="5"/><path d="M6 3.2v3.2M6 8.2v.1" stroke-linecap="round"/></svg>1 limit reached</span></div></div>`;
+</script></body></html>
